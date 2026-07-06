@@ -1,0 +1,17 @@
+{
+  "name": "nacademy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "nAcademy — multi-branch sports academy management (static site: vanilla JS + Firebase Firestore).",
+  "scripts": {
+    "build": "echo \"Static site — no build step needed.\"",
+    "start": "npx serve .",
+    "test": "node --test \"tests/*.test.js\"",
+    "test:unit": "node --test tests/unit.test.js",
+    "test:integration": "node --test tests/integration.test.js",
+    "test:automation": "node --test tests/automation.test.js"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.4"
+  }
+}
