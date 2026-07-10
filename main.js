@@ -2307,7 +2307,7 @@ function renewSubscription() {
 }
 
 function updateFinancial() {
-  const totalIncome = data.payments.reduce((sum, p) => sum + num(p.amount), 0);
+  const totalIncome = revenueSum(data.payments);
   const totalExpenses = data.expenses.reduce((sum, e) => sum + num(e.amount), 0);
 
   document.getElementById('fin-income').textContent = `${totalIncome.toLocaleString()} ج.م`;
@@ -4581,7 +4581,7 @@ function updateDashboard() {
   // (5) Total revenue comes from the running aggregate (meta/stats) so the
   // dashboard never has to read every payment. When the full history is
   // loaded (reports view) we sum it directly for an exact figure.
-  const revenue = historyFullyLoaded ? data.payments.reduce((sum, p) => sum + num(p.amount), 0) : stats.revenue || 0;
+  const revenue = historyFullyLoaded ? revenueSum(data.payments) : stats.revenue || 0;
 
   document.getElementById('dash-total').textContent = total;
   document.getElementById('dash-active').textContent = active;
@@ -4700,6 +4700,20 @@ const REVENUE_CAT_LABELS = {
   sales: 'مبيعات (أدوات)',
   other: 'أخرى (قيد/كارنيه/اختبارات/إيجار)',
 };
+
+// Only subscriptions and sales count toward "إجمالي الإيرادات" and net
+// profit. Tournaments, medical check-ups and "أخرى" are still recorded and
+// shown in their own cards/reports, but EXCLUDED from every revenue total
+// (they're collected-and-passed-on money, not academy income).
+const COUNTABLE_REVENUE_CATS = ['subscription', 'sales'];
+function countsAsRevenue(p) {
+  return COUNTABLE_REVENUE_CATS.includes(revenueCategory(p));
+}
+// Total of only the payments that count as revenue — use this everywhere a
+// "total income" figure is shown, instead of summing all payments.
+function revenueSum(payments) {
+  return (payments || []).reduce((s, p) => s + (countsAsRevenue(p) ? num(p.amount) : 0), 0);
+}
 
 // Sums the given (already branch/period-scoped) payments per category and
 // writes each total into its dashboard card.
@@ -4824,7 +4838,7 @@ function filterBranchDashboard() {
   // (setDashPeriod loads that month's window first).
   let totalIncome, totalExpenses;
   if (bounds) {
-    totalIncome = incomePayments.reduce((s, p) => s + num(p.amount), 0);
+    totalIncome = revenueSum(incomePayments);
     totalExpenses = expenses.reduce((s, e) => s + num(e.amount), 0);
   } else {
     const agg = allBranches ? stats : statsByBranch[branch] || { revenue: 0, expenses: 0 };
@@ -5549,7 +5563,7 @@ function fdEmptyRow(cols) {
 // Revenue (paid) for a branch in a given calendar month.
 function branchMonthRevenue(branch, y, m) {
   return data.payments.reduce((s, p) => {
-    if (p.branch !== branch) return s;
+    if (p.branch !== branch || !countsAsRevenue(p)) return s;
     const ts = parseDate(p.date);
     if (!ts) return s;
     const d = new Date(ts);
@@ -5612,8 +5626,9 @@ function renderFinancialDashboard() {
   payments = fdFilterByDateRange(payments, dateFrom, dateTo);
   expenses = fdFilterByDateRange(expenses, dateFrom, dateTo);
 
-  // Calculations
-  const totalIncome = payments.reduce((s, p) => s + num(p.amount), 0);
+  // Calculations — revenue counts subscriptions + sales only (see revenueSum)
+  const totalIncome = revenueSum(payments);
+  const countablePayments = payments.filter(countsAsRevenue);
   const totalExpenses = expenses.reduce((s, e) => s + num(e.amount), 0);
   const salaryExpenses = expenses.filter(e => isSalaryType(e.type));
   const nonSalaryExpenses = expenses.filter(e => !isSalaryType(e.type));
@@ -5628,7 +5643,7 @@ function renderFinancialDashboard() {
 
   // KPI Cards
   document.getElementById('fd-total-income').textContent = `${totalIncome.toLocaleString()} ج.م`;
-  document.getElementById('fd-income-count').textContent = `${payments.length} عملية`;
+  document.getElementById('fd-income-count').textContent = `${countablePayments.length} عملية`;
   document.getElementById('fd-total-expenses').textContent = `${totalExpenses.toLocaleString()} ج.م`;
   document.getElementById('fd-expense-count').textContent = `${expenses.length} عملية`;
   document.getElementById('fd-total-salaries').textContent = `${totalSalaries.toLocaleString()} ج.م`;
@@ -5667,7 +5682,7 @@ function renderFinancialDashboard() {
         dateFrom,
         dateTo,
       );
-      const inc = bp.reduce((s, p) => s + num(p.amount), 0);
+      const inc = revenueSum(bp);
       const exp = be.reduce((s, e) => s + num(e.amount), 0);
       return { name: b, income: inc, expenses: exp, profit: inc - exp };
     });
@@ -5892,7 +5907,7 @@ function exportFinancialDashboardReport() {
   payments = fdFilterByDateRange(payments, dateFrom, dateTo);
   expenses = fdFilterByDateRange(expenses, dateFrom, dateTo);
 
-  const totalIncome = payments.reduce((s, p) => s + num(p.amount), 0);
+  const totalIncome = revenueSum(payments);
   const totalExpenses = expenses.reduce((s, e) => s + num(e.amount), 0);
   const totalSalaries = expenses.filter(e => isSalaryType(e.type)).reduce((s, e) => s + num(e.amount), 0);
   const netProfit = totalIncome - totalExpenses;
@@ -5959,7 +5974,7 @@ function updateReports() {
   const total = data.trainees.length;
   const active = data.trainees.filter(t => t.status === 'نشط').length;
   const tests = data.trainees.filter(t => t.type === 'test').length;
-  const totalIncome = data.payments.reduce((sum, p) => sum + num(p.amount), 0);
+  const totalIncome = revenueSum(data.payments);
   const totalExpenses = data.expenses.reduce((sum, e) => sum + num(e.amount), 0);
   const totalSalaries = data.expenses.filter(e => isSalaryType(e.type)).reduce((sum, e) => sum + num(e.amount), 0);
   const totalAttendance = data.attendance.length;
@@ -6094,7 +6109,7 @@ function buildMembersReport(branch) {
 function buildFinancialReport(branch) {
   const payments = branch ? data.payments.filter(p => (p.branch || 'غير محدد') === branch) : data.payments;
   const expenses = branch ? data.expenses.filter(e => (e.branch || 'غير محدد') === branch) : data.expenses;
-  const totalIncome = payments.reduce((sum, p) => sum + num(p.amount), 0);
+  const totalIncome = revenueSum(payments);
   const totalExpenses = expenses.reduce((sum, e) => sum + num(e.amount), 0);
   const totalSalaries = expenses.filter(e => isSalaryType(e.type)).reduce((sum, e) => sum + num(e.amount), 0);
   const net = totalIncome - totalExpenses;
@@ -6328,7 +6343,7 @@ function getMonthlyData(monthVal, branch) {
   const inMonth = x => dateKey(x.date).slice(0, 7) === monthVal; // YYYY-MM
   const pays = data.payments.filter(p => inBranch(p) && inMonth(p));
   const exps = data.expenses.filter(e => inBranch(e) && inMonth(e));
-  const income = pays.reduce((s, p) => s + num(p.amount), 0);
+  const income = revenueSum(pays);
   const expense = exps.reduce((s, e) => s + num(e.amount), 0);
   return { pays, exps, income, expense, net: income - expense };
 }
@@ -6471,7 +6486,7 @@ function getDailyData(dateVal, branch) {
   const inBranch = x => branch === 'الكل' || (x.branch || 'غير محدد') === branch;
   const pays = data.payments.filter(p => inBranch(p) && dateKey(p.date) === dateVal);
   const exps = data.expenses.filter(e => inBranch(e) && dateKey(e.date) === dateVal);
-  const income = pays.reduce((s, p) => s + num(p.amount), 0);
+  const income = revenueSum(pays);
   const expense = exps.reduce((s, e) => s + num(e.amount), 0);
   return { pays, exps, income, expense, net: income - expense };
 }

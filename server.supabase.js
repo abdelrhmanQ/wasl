@@ -630,7 +630,11 @@ async function dbSetDoc(table, id, obj) {
     if (auth.currentUser && obj.createdBy == null) obj.createdBy = auth.currentUser.email;
   }
   cacheLocally();
-  if (isNew && table === paymentsCol) bumpStat('revenue', num(obj.amount), obj.branch);
+  // Only payments that count as revenue (subscriptions + sales — see
+  // countsAsRevenue in main.js) bump the live revenue total; tournaments,
+  // medical check-ups and "أخرى" are recorded but excluded from totals.
+  if (isNew && table === paymentsCol && (typeof countsAsRevenue !== 'function' || countsAsRevenue(obj)))
+    bumpStat('revenue', num(obj.amount), obj.branch);
   if (isNew && table === expensesCol) bumpStat('expenses', num(obj.amount), obj.branch);
   if (mustQueue()) {
     enqueueOp({ kind: 'upsert', table, rowId: String(id), obj: JSON.parse(JSON.stringify(obj)) });
