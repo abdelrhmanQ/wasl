@@ -108,6 +108,8 @@ function applySection(name, gen, rows) {
   sectionGen[name] = gen;
   data[name] = rows.map(rowToRecord);
   loadedSections[name] = true;
+  // Queued offline writes for this section must survive the reload.
+  applyOutboxLocally(name);
   return true;
 }
 
@@ -236,6 +238,13 @@ async function recomputeStats() {
 
 // ==================== LOAD ====================
 async function loadData() {
+  // Upload any queued offline writes FIRST, so the reload below reads them
+  // back from the server instead of overwriting them.
+  try {
+    await flushOutbox();
+  } catch (e) {
+    /* still offline — the catch below serves the local cache */
+  }
   try {
     // Current-state collections (small) load in full, branch-scoped.
     const [trainees, employees, groups, sessions] = await Promise.all([
@@ -261,13 +270,19 @@ async function loadData() {
 
     // Today's attendance window is needed on first paint.
     await loadSection('attendance');
+    // Anything still queued (e.g. flaky connection) stays visible in the UI.
+    applyOutboxLocally();
     cacheLocally();
   } catch (err) {
     console.error('Supabase load error:', err);
     const saved = localStorage.getItem('racer-data');
     if (saved) data = JSON.parse(saved);
+    // The local snapshot already contains the queued (offline) work, but
+    // re-apply on top to be safe if the snapshot predates some queued ops.
+    applyOutboxLocally();
     showNotification('تعذر الاتصال بقاعدة البيانات، يتم عرض آخر نسخة محفوظة محلياً', 'danger');
   }
+  renderOutboxStatus();
 }
 
 // Load ONE history collection: branch-scoped + time-windowed.
@@ -407,11 +422,204 @@ function refreshHistoryViews() {
   });
 }
 
+// ==================== OFFLINE OUTBOX ====================
+// Every write goes to the DB immediately when possible. When the network is
+// down (or writes are already queued, to preserve order) the operation is
+// stored in a persistent queue and replayed automatically once the connection
+// returns. This is what makes the app safe to use fully offline: nothing that
+// was recorded (payments, players, attendance...) is ever lost.
+const OUTBOX_KEY = 'racer-outbox';
+let outbox = [];
+try {
+  outbox = JSON.parse(localStorage.getItem(OUTBOX_KEY)) || [];
+} catch (e) {
+  outbox = [];
+}
+
+function saveOutbox() {
+  try {
+    localStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
+  } catch (e) {
+    /* storage full — the in-memory queue still works for this session */
+  }
+  renderOutboxStatus();
+}
+
+// Network failures (offline, DNS, timeouts) are retryable; PostgREST errors
+// (RLS denial, constraint...) carry a `code` and are NOT retryable forever.
+function isNetworkError(err) {
+  if (!navigator.onLine) return true;
+  if (!err) return false;
+  if (err.code && /^[0-9A-Z]{5}$/.test(String(err.code))) return false;
+  const msg = String((err && err.message) || err);
+  return /fetch|network|failed to|load failed|timeout/i.test(msg);
+}
+
+function enqueueOp(op) {
+  op.opId = 'OP-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
+  op.tries = 0;
+  outbox.push(op);
+  saveOutbox();
+}
+
+// Sends ONE queued op to Supabase. Throws on failure (caller decides retry).
+async function sendOp(op) {
+  if (op.kind === 'upsert') {
+    const { error } = await sb.from(op.table).upsert(toRow(op.rowId, op.obj));
+    if (error) throw error;
+  } else if (op.kind === 'insert') {
+    const row = { branch: op.obj.branch || null, ts: op.obj.ts || null, data: op.obj };
+    if (op.table === attendanceCol) row.trainee_id = op.obj.id || null;
+    const { error } = await sb.from(op.table).insert(row);
+    // Unique-index rejection = another device already recorded it — drop ours.
+    if (error && error.code === '23505') return;
+    if (error) throw error;
+  } else if (op.kind === 'delete') {
+    const { error } = await sb.from(op.table).delete().eq('id', String(op.rowId));
+    if (error) throw error;
+  } else if (op.kind === 'deleteWhere') {
+    const { error } = await sb.from(op.table).delete().eq(op.column, op.value);
+    if (error) throw error;
+  } else if (op.kind === 'counter') {
+    const { error } = await sb.from('meta').upsert({ id: 'counter', data: { value: op.value } });
+    if (error) throw error;
+  }
+}
+
+// Replays the queue in order. Stops on the first network failure (still
+// offline — retried on the next 'online' event / timer). A non-network error
+// is retried up to 5 flushes, then dropped so it can't block the queue.
+let outboxFlushing = false;
+async function flushOutbox() {
+  if (outboxFlushing || outbox.length === 0) return;
+  outboxFlushing = true;
+  const had = outbox.length;
+  renderOutboxStatus('sending');
+  try {
+    while (outbox.length) {
+      const op = outbox[0];
+      try {
+        await sendOp(op);
+        outbox.shift();
+        saveOutbox();
+      } catch (err) {
+        if (isNetworkError(err)) break; // still offline — try again later
+        // Auth problems (expired session, RLS refusal) must NEVER drop the
+        // queued work — it uploads after the next sign-in. Keep and retry.
+        const authErr =
+          err &&
+          (err.status === 401 ||
+            err.status === 403 ||
+            String(err.code) === '42501' ||
+            /jwt|token|auth|api key/i.test(String(err.message || '')));
+        if (authErr) {
+          if (typeof showNotification === 'function')
+            showNotification('توجد عمليات معلّقة بحاجة لتسجيل الدخول لرفعها', 'warning');
+          break;
+        }
+        op.tries = (op.tries || 0) + 1;
+        console.error('Outbox op failed (try ' + op.tries + '):', op, err);
+        if (op.tries >= 5) {
+          outbox.shift(); // drop permanently-failing op so the rest can flow
+          if (typeof showNotification === 'function')
+            showNotification('تعذر رفع إحدى العمليات نهائياً — راجع سجل الأخطاء', 'danger');
+        }
+        saveOutbox();
+        break; // don't hot-loop on a failing op; retry on the next flush
+      }
+    }
+  } finally {
+    outboxFlushing = false;
+    renderOutboxStatus();
+    if (had > 0 && outbox.length === 0 && typeof showNotification === 'function') {
+      showNotification('تم رفع كل العمليات المعلّقة بنجاح ✅');
+    }
+  }
+}
+
+// Re-applies queued (not-yet-uploaded) ops on top of freshly loaded data, so
+// a reload from the server can never make offline work disappear from the UI.
+const TABLE_TO_KEY = {
+  trainees: 'trainees',
+  employees: 'employees',
+  groups: 'groups',
+  sessions: 'sessions',
+  attendance: 'attendance',
+  payments: 'payments',
+  expenses: 'expenses',
+  staff_attendance: 'staffAttendance',
+  feedback: 'feedback',
+};
+function applyOutboxLocally(onlyKey) {
+  outbox.forEach(op => {
+    const key = TABLE_TO_KEY[op.table];
+    if (!key || !Array.isArray(data[key])) return;
+    if (onlyKey && key !== onlyKey) return;
+    if (op.kind === 'upsert') {
+      const rec = Object.assign({}, op.obj, { _docId: op.rowId });
+      // Match by the ROW id only (falling back to .id for records that never
+      // got a _docId locally, like trainees). Never match payments by their
+      // .id field — that's the PLAYER id and collides ('—' for manual ones).
+      const i = data[key].findIndex(r => String(r._docId != null ? r._docId : r.id) === String(op.rowId));
+      if (i >= 0) data[key][i] = rec;
+      else data[key].push(rec);
+    } else if (op.kind === 'insert') {
+      const dup = data[key].some(r => r.ts === op.obj.ts && r.id === op.obj.id);
+      if (!dup) data[key].push(Object.assign({}, op.obj));
+    } else if (op.kind === 'delete') {
+      data[key] = data[key].filter(r => String(r._docId) !== String(op.rowId) && String(r.id) !== String(op.rowId));
+    } else if (op.kind === 'deleteWhere') {
+      const field = op.column === 'trainee_id' ? 'id' : op.column;
+      data[key] = data[key].filter(r => r[field] !== op.value);
+    }
+  });
+}
+
+// Header chip showing the offline/pending state. Hidden when all is well.
+function renderOutboxStatus(state) {
+  const el = document.getElementById('outbox-status');
+  if (!el) return;
+  const n = outbox.length;
+  if (state === 'sending' && n > 0) {
+    el.style.display = '';
+    el.className = 'outbox-chip sending';
+    el.textContent = `⏫ جارٍ رفع ${n} عملية...`;
+    return;
+  }
+  if (n > 0) {
+    el.style.display = '';
+    el.className = 'outbox-chip pending';
+    el.textContent = navigator.onLine ? `⏳ ${n} عملية بانتظار الرفع` : `📴 أوفلاين — ${n} عملية بانتظار الرفع`;
+  } else if (!navigator.onLine) {
+    el.style.display = '';
+    el.className = 'outbox-chip offline';
+    el.textContent = '📴 أوفلاين — يعمل محلياً';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+// Flush triggers: connection returns, and a safety timer while ops are queued.
+window.addEventListener('online', () => {
+  renderOutboxStatus();
+  flushOutbox();
+});
+window.addEventListener('offline', () => renderOutboxStatus());
+setInterval(() => {
+  if (navigator.onLine && outbox.length) flushOutbox();
+}, 30000);
+
 // ==================== WRITE HELPERS ====================
 // Build the row stored for a record: scalar branch/ts columns + the full
 // object as JSONB (so the record shape main.js expects is preserved).
 function toRow(id, obj) {
   return { id: String(id), branch: obj.branch || null, ts: obj.ts || null, data: obj };
+}
+
+// True when a write must be queued instead of sent directly: we're offline,
+// or older ops are already queued (sending now would break write order).
+function mustQueue() {
+  return !navigator.onLine || outbox.length > 0;
 }
 
 async function dbSetDoc(table, id, obj) {
@@ -424,12 +632,22 @@ async function dbSetDoc(table, id, obj) {
   cacheLocally();
   if (isNew && table === paymentsCol) bumpStat('revenue', num(obj.amount), obj.branch);
   if (isNew && table === expensesCol) bumpStat('expenses', num(obj.amount), obj.branch);
+  if (mustQueue()) {
+    enqueueOp({ kind: 'upsert', table, rowId: String(id), obj: JSON.parse(JSON.stringify(obj)) });
+    flushOutbox();
+    return;
+  }
   try {
     const { error } = await sb.from(table).upsert(toRow(id, obj));
     if (error) throw error;
   } catch (err) {
+    if (isNetworkError(err)) {
+      enqueueOp({ kind: 'upsert', table, rowId: String(id), obj: JSON.parse(JSON.stringify(obj)) });
+      showNotification('لا يوجد اتصال — ستُرفع العملية تلقائياً عند عودة النت', 'warning');
+      return;
+    }
     console.error('Supabase set error:', err);
-    showNotification('تم الحفظ محلياً، لكن تعذر رفعه لقاعدة البيانات. تحقق من الاتصال', 'danger');
+    showNotification('تعذر الحفظ في قاعدة البيانات', 'danger');
   }
 }
 
@@ -437,11 +655,18 @@ async function dbSetDoc(table, id, obj) {
 // player's attendance can be deleted when the player is removed.
 // Returns { ok, duplicate }: `duplicate` is true when the DB's unique index
 // rejected the row (another device already inserted the same attendance) —
-// callers undo their local copy instead of showing a scary error.
+// callers undo their local copy instead of showing a scary error. Offline,
+// the row is queued ({ok:true, queued:true}) and a same-day duplicate from
+// another device is resolved by the DB constraint at upload time.
 async function dbAddDoc(table, obj) {
   if (obj && obj.ts == null) obj.ts = Date.now();
   if (obj && obj.createdBy == null && auth.currentUser) obj.createdBy = auth.currentUser.email;
   cacheLocally();
+  if (mustQueue()) {
+    enqueueOp({ kind: 'insert', table, obj: JSON.parse(JSON.stringify(obj)) });
+    flushOutbox();
+    return { ok: true, duplicate: false, queued: true };
+  }
   const row = { branch: obj.branch || null, ts: obj.ts || null, data: obj };
   if (table === attendanceCol) row.trainee_id = obj.id || null;
   try {
@@ -450,14 +675,24 @@ async function dbAddDoc(table, obj) {
     return { ok: true, duplicate: false };
   } catch (err) {
     if (err && err.code === '23505') return { ok: false, duplicate: true };
+    if (isNetworkError(err)) {
+      enqueueOp({ kind: 'insert', table, obj: JSON.parse(JSON.stringify(obj)) });
+      showNotification('لا يوجد اتصال — ستُرفع العملية تلقائياً عند عودة النت', 'warning');
+      return { ok: true, duplicate: false, queued: true };
+    }
     console.error('Supabase add error:', err);
-    showNotification('تم الحفظ محلياً، لكن تعذر رفعه لقاعدة البيانات. تحقق من الاتصال', 'danger');
+    showNotification('تعذر الحفظ في قاعدة البيانات', 'danger');
     return { ok: false, duplicate: false };
   }
 }
 
 async function dbDeleteDoc(table, id) {
   cacheLocally();
+  if (mustQueue()) {
+    enqueueOp({ kind: 'delete', table, rowId: String(id) });
+    flushOutbox();
+    return;
+  }
   try {
     // count:'exact' exposes silent RLS refusals: a delete the policy blocks
     // returns no error but affects 0 rows — surface that instead of hiding it.
@@ -467,6 +702,11 @@ async function dbDeleteDoc(table, id) {
       showNotification('لم يُحذف السجل من قاعدة البيانات — غالباً لا تملك صلاحية الحذف (سيعود بعد التحديث)', 'danger');
     }
   } catch (err) {
+    if (isNetworkError(err)) {
+      enqueueOp({ kind: 'delete', table, rowId: String(id) });
+      showNotification('لا يوجد اتصال — سيُحذف من قاعدة البيانات عند عودة النت', 'warning');
+      return;
+    }
     console.error('Supabase delete error:', err);
     showNotification('تعذر الحذف من قاعدة البيانات السحابية', 'danger');
   }
@@ -477,10 +717,19 @@ async function dbDeleteDoc(table, id) {
 async function dbDeleteWhere(table, field, value) {
   cacheLocally();
   const column = table === attendanceCol && field === 'id' ? 'trainee_id' : field;
+  if (mustQueue()) {
+    enqueueOp({ kind: 'deleteWhere', table, column, value });
+    flushOutbox();
+    return;
+  }
   try {
     const { error } = await sb.from(table).delete().eq(column, value);
     if (error) throw error;
   } catch (err) {
+    if (isNetworkError(err)) {
+      enqueueOp({ kind: 'deleteWhere', table, column, value });
+      return;
+    }
     console.error('Supabase delete-where error:', err);
     showNotification('تعذر حذف بعض السجلات المرتبطة من قاعدة البيانات', 'danger');
   }
@@ -488,9 +737,26 @@ async function dbDeleteWhere(table, field, value) {
 
 async function dbSaveCounter() {
   cacheLocally();
+  if (mustQueue()) {
+    // Only the LATEST counter value matters — replace any queued one.
+    const existing = outbox.find(op => op.kind === 'counter');
+    if (existing) {
+      existing.value = data.counter;
+      saveOutbox();
+    } else {
+      enqueueOp({ kind: 'counter', value: data.counter });
+    }
+    flushOutbox();
+    return;
+  }
   try {
-    await sb.from('meta').upsert({ id: 'counter', data: { value: data.counter } });
+    const { error } = await sb.from('meta').upsert({ id: 'counter', data: { value: data.counter } });
+    if (error) throw error;
   } catch (err) {
+    if (isNetworkError(err)) {
+      enqueueOp({ kind: 'counter', value: data.counter });
+      return;
+    }
     console.error('Supabase counter error:', err);
   }
 }

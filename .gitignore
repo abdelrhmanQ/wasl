@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Local dev server logs
+*.log
+server-local.log
+
+# Local tooling / editor settings
+.claude/
+.vscode/
+.DS_Store
+
+# Environment / secrets (never commit credentials)
+.env
+.env.*
+
+# Local data files (real player names/amounts) — NEVER publish
+*.xlsx
+*.xlsm
+import-june-july-mariotia.sql
+fix-move-july2-to-june.sql

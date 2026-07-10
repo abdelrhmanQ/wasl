@@ -53,6 +53,10 @@ function showSection(name) {
   // (1) On-demand: these sections pull their history collection the first
   // time they're opened, then render. Later opens use what's already loaded.
   if (name === 'financial') ensureSection('payments', updateFinancial);
+  if (name === 'extra-income') {
+    populateExtraPlayerList();
+    ensureSection('payments', renderExtraIncome);
+  }
   if (name === 'salaries') ensureSection('expenses', updateSalaries);
   if (name === 'attendance') updateAttendanceLog();
   if (name === 'sessions') renderSessionsSection();
@@ -171,12 +175,6 @@ function populateBlankCardsForm() {
   }
   const cardSport = document.getElementById('blank-cards-sport');
   if (cardSport && !cardSport.options.length) cardSport.innerHTML = sportOptionsHTML('');
-  const ageSel = document.getElementById('blank-cards-age');
-  if (ageSel && !ageSel.options.length) {
-    ageSel.innerHTML = AGE_BANDS.map(a => `<option value="${a}" ${a === 'U9' ? 'selected' : ''}>${a}</option>`).join(
-      '',
-    );
-  }
   const sectorSel = document.getElementById('blank-cards-sector');
   if (sectorSel && !sectorSel.options.length) {
     sectorSel.innerHTML =
@@ -680,11 +678,18 @@ function lastAttendanceInfo(t) {
 // Active subscribers who have been absent past the threshold — the people
 // most at risk of dropping out, so the gym can follow up with them.
 function getAbsentees() {
-  return data.trainees
-    .filter(t => t.type === 'subscription' && t.status === 'نشط')
-    .map(t => ({ t, info: lastAttendanceInfo(t) }))
-    .filter(x => x.info.days !== null && x.info.days >= ABSENCE_ALERT_DAYS)
-    .sort((a, b) => b.info.days - a.info.days);
+  return (
+    data.trainees
+      .filter(t => t.type === 'subscription' && t.status === 'نشط')
+      .map(t => ({ t, info: lastAttendanceInfo(t) }))
+      .filter(x => x.info.days !== null && x.info.days >= ABSENCE_ALERT_DAYS)
+      // Imported historical players have no attendance records, so absence is
+      // measured from their start date — that would falsely flag every one of
+      // them as "منقطع". Skip them until they log a REAL attendance; after that
+      // the normal (last-attendance based) rule applies like anyone else.
+      .filter(x => !(x.info.neverAttended && x.t.importSrc))
+      .sort((a, b) => b.info.days - a.info.days)
+  );
 }
 
 // Single source of truth for "how much is left" on a subscription, whether
@@ -1737,20 +1742,20 @@ function renderRefunds() {
 const ACADEMY_PHONES = ['01150011836', '01021811713'];
 const ACADEMY_INSTAGRAM = 'alwasl.academy.eg';
 const ACADEMY_FACEBOOK = 'El Wasl Academy';
-// Faint, centred logo watermark that sits behind the card content.
-function cardWatermark(logoUrl) {
-  return `<img class="card-wm" src="${logoUrl}" alt="" onerror="this.style.display='none';">`;
-}
-// The BACK face of a card: big logo + academy name + phones + social handles.
+// The BACK face of a card: the logo sits behind as a large faded backdrop, with
+// the academy name + slogan, then phones + social handles (no emojis).
 // Same dark theme as the front; used as a second page/slot for double-sided print.
 function cardBackInnerHTML(logoUrl) {
-  return `${cardWatermark(logoUrl)}
- <img class="back-logo" src="${logoUrl}" alt="" onerror="this.style.display='none';">
- <div class="back-name">El Wasl <span>Academy</span></div>
- <div class="back-contacts">
- <div class="bc bc-phones">📞 ${ACADEMY_PHONES.join('  ·  ')}</div>
- <div class="bc">📷 Instagram: ${esc(ACADEMY_INSTAGRAM)}</div>
- <div class="bc">ⓕ Facebook: ${esc(ACADEMY_FACEBOOK)}</div>
+  return `<img class="back-logo" src="${logoUrl}" alt="" onerror="this.style.display='none';">
+ <div class="back-edges">
+ <div class="edge edge-left">
+ <div class="bc bc-phones">${ACADEMY_PHONES[0]}</div>
+ <div class="bc">Facebook: ${esc(ACADEMY_FACEBOOK)}</div>
+ </div>
+ <div class="edge edge-right">
+ <div class="bc bc-phones">${ACADEMY_PHONES[1]}</div>
+ <div class="bc">Instagram: ${esc(ACADEMY_INSTAGRAM)}</div>
+ </div>
  </div>`;
 }
 
@@ -1780,7 +1785,7 @@ function openCardWindow(t) {
     .map(code => {
       const sport = sportForCode(code) || traineeSports(t)[0] || '';
       const color = branchColor(t.branch);
-      const planText = sportHasLevel(sport) && t.level ? `${sport} (${t.level})` : sport;
+      const planText = planTextEn(sport, t.level);
       return `
  <div class="card" style="--c:${color};">
  <div class="card-top">
@@ -1793,15 +1798,12 @@ function openCardWindow(t) {
  <div class="divider"></div>
  <div class="card-body">
  <div class="card-info">
- <div class="lbl">الاسم</div>
  <div class="member-name">${esc(name)}</div>
  ${planText ? `<div class="member-plan">${esc(planText)}</div>` : ''}
- <div class="lbl">الكود</div>
  <div class="member-code">${esc(code)}</div>
  </div>
  <div class="qr-box"><div class="qr" data-code="${esc(code)}"></div></div>
  </div>
- <div class="card-footer">يُستخدم هذا الكود لتسجيل الحضور عند الدخول</div>
  </div>
  <div class="card back" style="--c:${color};">${cardBackInnerHTML(logoUrl)}</div>`;
     })
@@ -1809,8 +1811,7 @@ function openCardWindow(t) {
 
   win.document.write(`
  <html dir="rtl" lang="ar"><head><title>بطاقة العضوية - ${esc(t.id)}</title>
- <meta charset="UTF-8">
- <script src="${qrUrl}"><\/script>
+ <meta charset="UTF-8"> <script src="${qrUrl}"><\/script>
  <style>
  @page { size: 90mm 56mm; margin: 0; }
  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -1843,14 +1844,14 @@ function openCardWindow(t) {
  .member-code { font-size: 13px; font-family: 'Courier New', monospace; letter-spacing: 1px; color: #E9EDF3; font-weight: 700; }
  .qr-box { background: #ffffff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm var(--c); }
  .card-footer { font-size: 6.5px; color: var(--c); text-align: center; letter-spacing: 0.5px; z-index: 1; }
- .card-wm { position: absolute; width: 40mm; height: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.06; filter: brightness(0) invert(1); z-index: 0; }
- .card.back { justify-content: center; align-items: center; text-align: center; gap: 1.5mm; }
- .back-logo { height: 17mm; width: auto; z-index: 1; }
- .back-name { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 1px; z-index: 1; }
- .back-name span { color: var(--c); }
- .back-contacts { z-index: 1; margin-top: 1mm; }
- .bc { font-size: 8px; color: #D6DBE2; line-height: 1.75; letter-spacing: 0.3px; }
- .bc.bc-phones { color: var(--c); font-weight: 800; font-size: 9px; margin-bottom: 0.8mm; }
+ .card.back { justify-content: center; align-items: center; text-align: center; }
+ .back-logo { position: absolute; width: 46mm; height: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.14; z-index: 0; }
+ .back-edges { position: absolute; left: 5mm; right: 5mm; bottom: 4.5mm; display: flex; direction: ltr; justify-content: space-between; align-items: flex-end; z-index: 1; }
+ .edge { display: flex; flex-direction: column; gap: 0.6mm; }
+ .edge-left { align-items: flex-start; text-align: left; }
+ .edge-right { align-items: flex-end; text-align: right; }
+ .bc { font-size: 7.5px; color: #D6DBE2; letter-spacing: 0.2px; }
+ .bc.bc-phones { color: var(--c); font-weight: 800; font-size: 9px; }
  </style>
  </head>
  <body>
@@ -1910,14 +1911,14 @@ const TRAINEE_CARD_CSS = `
  .member-code { font-size: 13px; font-family: 'Courier New', monospace; letter-spacing: 1px; color: #E9EDF3; font-weight: 700; }
  .qr-box { background: #ffffff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm var(--c); }
  .card-footer { font-size: 6.5px; color: var(--c); text-align: center; letter-spacing: 0.5px; z-index: 1; }
- .card-wm { position: absolute; width: 40mm; height: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.06; filter: brightness(0) invert(1); z-index: 0; }
- .card.back { justify-content: center; align-items: center; text-align: center; gap: 1.5mm; }
- .back-logo { height: 17mm; width: auto; z-index: 1; }
- .back-name { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 1px; z-index: 1; }
- .back-name span { color: var(--c); }
- .back-contacts { z-index: 1; margin-top: 1mm; }
- .bc { font-size: 8px; color: #D6DBE2; line-height: 1.75; letter-spacing: 0.3px; }
- .bc.bc-phones { color: var(--c); font-weight: 800; font-size: 9px; margin-bottom: 0.8mm; }
+ .card.back { justify-content: center; align-items: center; text-align: center; }
+ .back-logo { position: absolute; width: 46mm; height: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.14; z-index: 0; }
+ .back-edges { position: absolute; left: 5mm; right: 5mm; bottom: 4.5mm; display: flex; direction: ltr; justify-content: space-between; align-items: flex-end; z-index: 1; }
+ .edge { display: flex; flex-direction: column; gap: 0.6mm; }
+ .edge-left { align-items: flex-start; text-align: left; }
+ .edge-right { align-items: flex-end; text-align: right; }
+ .bc { font-size: 7.5px; color: #D6DBE2; letter-spacing: 0.2px; }
+ .bc.bc-phones { color: var(--c); font-weight: 800; font-size: 9px; }
  `;
 
 // Staff card look (deep-gold accent), colours inlined (constant per staff card).
@@ -1945,12 +1946,11 @@ const STAFF_CARD_CSS = `
 function traineeCardSlot(t, code, logoUrl) {
   const sport = sportForCode(code) || traineeSports(t)[0] || '';
   const color = branchColor(t.branch);
-  const planText = sportHasLevel(sport) && t.level ? `${sport} (${t.level})` : sport;
+  const planText = planTextEn(sport, t.level);
   return `<div class="slot"><div class="card" style="--c:${color};">
  <div class="card-top"><div class="brand"><div class="club-name">El Wasl <span>Academy</span></div><div class="club-sub">${planText ? esc(planText) : 'Membership Card'}</div></div><img class="brand-logo" src="${logoUrl}" alt="" onerror="this.style.display='none';"></div>
  <div class="divider"></div>
- <div class="card-body"><div class="card-info"><div class="lbl">الاسم</div><div class="member-name">${esc(t.name || '')}</div>${planText ? `<div class="member-plan">${esc(planText)}</div>` : ''}<div class="lbl">الكود</div><div class="member-code">${esc(code)}</div></div><div class="qr-box"><div class="qr" data-code="${esc(code)}"></div></div></div>
- <div class="card-footer">يُستخدم هذا الكود لتسجيل الحضور عند الدخول</div>
+ <div class="card-body"><div class="card-info"><div class="member-name">${esc(t.name || '')}</div>${planText ? `<div class="member-plan">${esc(planText)}</div>` : ''}<div class="member-code">${esc(code)}</div></div><div class="qr-box"><div class="qr" data-code="${esc(code)}"></div></div></div>
  </div></div>`;
 }
 
@@ -1980,8 +1980,7 @@ function openCardsSheet(title, cardCss, slotsHtml) {
     return;
   }
   win.document.write(`
- <html dir="rtl" lang="ar"><head><title>${esc(title)}</title><meta charset="UTF-8">
- <script src="${qrUrl}"><\/script>
+ <html dir="rtl" lang="ar"><head><title>${esc(title)}</title><meta charset="UTF-8"> <script src="${qrUrl}"><\/script>
  <style>${SHEET_BASE_CSS}${cardCss}</style></head>
  <body><div class="sheet">${slotsHtml}</div>
  <script>
@@ -2351,6 +2350,150 @@ function updateFinancial() {
     .join('');
 }
 
+// ==================== EXTRA INCOME ====================
+// A standalone income section for tournaments (بطولة), exams (اختبار) and
+// medical check-ups (كشف طبي). Each entry can be linked to an existing player
+// (picked by name or code) OR left as a free-typed name for people who aren't
+// registered. Either way it's booked as a normal income payment (so it flows
+// into the financial totals, dashboard and reports) tagged `source: 'extra'`
+// so this section can list only its own entries. Linked entries carry the
+// player's real id; manual ones use the id '—' (like private-session income).
+const EXTRA_INCOME_TYPES = ['بطولة', 'اختبار', 'كشف طبي', 'مبيعات', 'قيد/كارنيه', 'أخرى'];
+
+// Show the sales-item picker only for the "مبيعات" type (item = نت/استك/جلفز...).
+function onExtraTypeChange() {
+  const grp = document.getElementById('extra-sales-item-group');
+  if (grp) grp.style.display = val('extra-type') === 'مبيعات' ? '' : 'none';
+}
+
+// Fills the #extra-player autocomplete with every registered player as
+// "الاسم — الكود", so the field can be filtered by typing either the name or
+// the code, while still accepting any free text for an unregistered person.
+function populateExtraPlayerList() {
+  const dl = document.getElementById('extra-player-list');
+  if (!dl) return;
+  dl.innerHTML = (data.trainees || []).map(t => `<option value="${esc(t.name)} — ${esc(t.id)}"></option>`).join('');
+}
+
+// Turns whatever the user typed/picked in #extra-player into { id, name }.
+// Matches (in order): the "name — code" datalist value, a bare code, then a
+// unique exact name. Anything else is treated as a manual (unlinked) name.
+function resolveExtraPlayer(raw) {
+  const s = (raw || '').trim();
+  if (!s) return { id: '—', name: '' };
+  if (s.includes(' — ')) {
+    const t = findTraineeByCode(s.split(' — ').pop().trim());
+    if (t) return { id: t.id, name: t.name };
+  }
+  const byCode = findTraineeByCode(s);
+  if (byCode) return { id: byCode.id, name: byCode.name };
+  const nm = s.toLowerCase();
+  const byName = (data.trainees || []).filter(t => (t.name || '').trim().toLowerCase() === nm);
+  if (byName.length === 1) return { id: byName[0].id, name: byName[0].name };
+  return { id: '—', name: s }; // unregistered / manual name
+}
+
+function addExtraIncome() {
+  const type = val('extra-type');
+  const desc = val('extra-desc').trim();
+  const salesItem = val('extra-sales-item').trim();
+  const amount = num(val('extra-amount'));
+  const method = val('extra-method') || 'نقداً';
+  const branch = val('extra-branch');
+  const date = val('extra-date');
+  const player = resolveExtraPlayer(val('extra-player'));
+
+  if (!EXTRA_INCOME_TYPES.includes(type)) {
+    showNotification('اختر نوع الإيراد', 'warning');
+    return;
+  }
+  // Sales must name an item (from the presets or typed manually).
+  if (type === 'مبيعات' && !salesItem) {
+    showNotification('اكتب أو اختر صنف المبيعات', 'warning');
+    return;
+  }
+  if (amount <= 0) {
+    showNotification('أدخل مبلغاً صالحاً', 'warning');
+    return;
+  }
+  if (!branch) {
+    showNotification('اختر الفرع', 'warning');
+    return;
+  }
+
+  // For sales the item is the "plan" (and prefixes the free-text note if any).
+  const plan = type === 'مبيعات' ? (desc ? `${salesItem} — ${desc}` : salesItem) : desc || type;
+
+  addPayment({
+    id: player.id,
+    name: player.name || plan || type,
+    type,
+    plan,
+    amount,
+    method,
+    date: date || todayAr(),
+    status: 'مكتمل',
+    branch,
+    source: 'extra',
+  });
+
+  setVal('extra-player', '');
+  setVal('extra-desc', '');
+  setVal('extra-sales-item', '');
+  setVal('extra-amount', '');
+  setVal('extra-branch', '');
+  renderExtraIncome();
+  updateFinancial();
+  updateDashboard();
+  const who = player.id !== '—' ? ` لـ ${player.name}` : '';
+  showNotification(`تم تسجيل إيراد ${type}${who} بمبلغ ${amount.toLocaleString()} ج.م`);
+}
+
+function renderExtraIncome() {
+  const tbody = document.getElementById('extra-income-table');
+  if (!tbody) return; // section not in the DOM (e.g. before it renders)
+  const rows = data.payments.filter(p => p.source === 'extra');
+  const total = rows.reduce((s, p) => s + num(p.amount), 0);
+  const totalEl = document.getElementById('extra-total');
+  if (totalEl) totalEl.textContent = `${total.toLocaleString()} ج.م`;
+
+  if (rows.length === 0) {
+    tbody.innerHTML =
+      '<tr><td colspan="9" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد إيرادات مسجلة</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows
+    .slice()
+    .reverse()
+    .map(p => {
+      const actions =
+        currentRole === 'admin' && p._docId
+          ? `<button class="btn btn-danger btn-sm" onclick="deletePayment('${esc(p._docId)}')">حذف</button>`
+          : '—';
+      // Linked entries show the player's name + code; manual/empty ones show "عام".
+      const playerCell =
+        p.id && p.id !== '—'
+          ? `${esc(p.name)} <code style="color: var(--gold); font-family: monospace;">${esc(p.id)}</code>`
+          : p.name && p.name !== p.type
+            ? esc(p.name)
+            : '<span style="color: rgba(48,56,65,0.4);">عام</span>';
+      return `
+ <tr>
+ <td><span class="badge badge-success">${esc(p.type)}</span></td>
+ <td style="font-size: 12px;">${playerCell}</td>
+ <td style="font-size: 12px;">${esc(p.plan || '—')}</td>
+ <td>${branchBadge(p.branch)}</td>
+ <td style="color: var(--success); font-weight: 700;">${num(p.amount).toLocaleString()} ج.م</td>
+ <td>${esc(p.method)}</td>
+ <td>${esc(p.date)}</td>
+ <td style="font-size:11px; color:rgba(48,56,65,0.55);">${esc(p.createdBy || '—')}</td>
+ <td>${actions}</td>
+ </tr>`;
+    })
+    .join('');
+}
+
 // ==================== SALARIES ====================
 // Picking "أخرى" as the role reveals a free-text field for the actual job.
 function toggleEmpRoleOther() {
@@ -2360,6 +2503,7 @@ function toggleEmpRoleOther() {
 
 function addEmployee() {
   const name = val('emp-name').trim();
+  const phone = val('emp-phone').trim();
   let role = val('emp-role');
   const salary = val('emp-salary');
   const branch = val('emp-branch');
@@ -2381,6 +2525,7 @@ function addEmployee() {
     id: `EMP-${Date.now()}`,
     code: generateStaffCode(),
     name,
+    phone,
     role,
     salary: parseInt(salary),
     branch: branch,
@@ -2392,6 +2537,7 @@ function addEmployee() {
   updateSalaries();
 
   setVal('emp-name', '');
+  setVal('emp-phone', '');
   setVal('emp-salary', '');
   setVal('emp-role-other', '');
   toggleEmpRoleOther();
@@ -2435,7 +2581,7 @@ function updateSalaries() {
     .filter(x => !(x.e.role && x.e.role.indexOf('مدرب') !== -1));
   if (nonCoaches.length === 0) {
     empTbody.innerHTML =
-      '<tr><td colspan="8" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا يوجد موظفون مسجلون</td></tr>';
+      '<tr><td colspan="9" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا يوجد موظفون مسجلون</td></tr>';
   } else {
     empTbody.innerHTML = nonCoaches
       .map(
@@ -2443,6 +2589,7 @@ function updateSalaries() {
  <tr>
  <td>${rowNum + 1}</td>
  <td><strong>${esc(e.name)}</strong></td>
+  <td style="font-family:monospace; direction:ltr;">${esc(e.phone || '—')}</td>
   <td>${esc(e.role)}</td>
   <td>${branchBadge(e.branch)}</td>
   <td style="color: var(--warning); font-weight: 700;">${num(e.salary).toLocaleString()} ج.م</td>
@@ -2545,6 +2692,7 @@ function deletePayment(docId) {
   data.payments = data.payments.filter(x => x._docId !== docId);
   dbDeleteDoc(paymentsCol, docId);
   updateFinancial();
+  renderExtraIncome();
   updateDashboard();
   showNotification('تم حذف عملية الدفع', 'danger');
 }
@@ -4527,18 +4675,162 @@ function updateDashboard() {
   filterBranchDashboard();
 }
 
+// Buckets a revenue payment into one of the five dashboard categories.
+// An explicit `cat` on the record wins (set on imported/historical rows);
+// otherwise it's inferred from the payment `type`. Anything not matched
+// (قيد/كارنيه، اختبارات، إيجار، ...) falls into "other".
+function revenueCategory(p) {
+  // Guard: an unexpected stored `cat` (old imports, manual edits) must never
+  // leak an unknown bucket into the sums — it counts as "other".
+  if (p.cat) return REVENUE_CAT_LABELS[p.cat] ? p.cat : 'other';
+  const t = p.type || '';
+  if (t === 'بطولة') return 'tournament';
+  if (t === 'كشف طبي') return 'medical';
+  if (['مبيعات', 'لوكر', 'انترنت', 'إيجار لوكر', 'اشتراك انترنت'].includes(t)) return 'sales';
+  if (['اشتراك جديد', 'تجديد', 'قسط', 'برايفت'].includes(t)) return 'subscription';
+  return 'other';
+}
+
+// Arabic labels for the five revenue categories — single source shared by the
+// dashboard red-card filter, the breakdown cards and the per-type reports.
+const REVENUE_CAT_LABELS = {
+  subscription: 'اشتراكات',
+  tournament: 'بطولات',
+  medical: 'كشوفات طبية',
+  sales: 'مبيعات (أدوات)',
+  other: 'أخرى (قيد/كارنيه/اختبارات/إيجار)',
+};
+
+// Sums the given (already branch/period-scoped) payments per category and
+// writes each total into its dashboard card.
+function renderRevenueBreakdown(payments) {
+  const sums = { subscription: 0, tournament: 0, medical: 0, sales: 0, other: 0 };
+  (payments || []).forEach(p => {
+    sums[revenueCategory(p)] += num(p.amount);
+  });
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = `${v.toLocaleString()} ج.م`;
+  };
+  set('rev-subscription', sums.subscription);
+  set('rev-tournament', sums.tournament);
+  set('rev-medical', sums.medical);
+  set('rev-sales', sums.sales);
+  set('rev-other', sums.other);
+}
+
+// ==================== PERIOD FILTER (dashboard + financial dashboard) ====================
+// 'this' = الشهر الحالي، 'last' = الشهر الماضي، 'all' = كل الفترة.
+// Month periods first load that month's history window from the DB (the
+// default window is only the recent days), then views filter in memory.
+let dashPeriod = 'all';
+// When the user picks a specific calendar month (#dash-month) it overrides the
+// this/last/all buttons. null = no specific month (use the period buttons).
+let dashMonthBounds = null;
+
+// The user chose a specific month for the revenue card: load that month's
+// history window, then re-render. Clearing the field falls back to the buttons.
+function onDashMonthChange() {
+  const el = document.getElementById('dash-month');
+  const v = el ? el.value : ''; // "YYYY-MM"
+  if (!v) {
+    dashMonthBounds = null;
+    filterBranchDashboard();
+    return;
+  }
+  const [y, m] = v.split('-').map(Number);
+  dashMonthBounds = {
+    from: new Date(y, m - 1, 1).getTime(),
+    to: new Date(y, m, 1).getTime() - 1,
+  };
+  // Un-highlight the period buttons — a specific month is active now.
+  markPeriodButtons('dash', '');
+  loadHistoryRange(dashMonthBounds.from, dashMonthBounds.to).then(filterBranchDashboard);
+}
+
+// [from, to] timestamps of a calendar-month period (null = no period filter).
+function periodBounds(period) {
+  const now = new Date();
+  if (period === 'this') {
+    return {
+      from: new Date(now.getFullYear(), now.getMonth(), 1).getTime(),
+      to: new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime() - 1,
+    };
+  }
+  if (period === 'last') {
+    return {
+      from: new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime(),
+      to: new Date(now.getFullYear(), now.getMonth(), 1).getTime() - 1,
+    };
+  }
+  return null;
+}
+
+// Highlight the active button in a period button group (dash-/fd- prefix).
+function markPeriodButtons(prefix, period) {
+  ['this', 'last', 'all'].forEach(p => {
+    const btn = document.getElementById(`${prefix}-period-${p}`);
+    if (btn) btn.className = `btn btn-sm ${p === period ? 'btn-primary' : 'btn-outline'}`;
+  });
+}
+
+function setDashPeriod(period) {
+  dashPeriod = period;
+  // Picking a period button clears any specific-month selection.
+  dashMonthBounds = null;
+  const mEl = document.getElementById('dash-month');
+  if (mEl) mEl.value = '';
+  markPeriodButtons('dash', period);
+  const bounds = periodBounds(period);
+  if (bounds) {
+    loadHistoryRange(bounds.from, bounds.to).then(filterBranchDashboard);
+  } else if (!historyFullyLoaded) {
+    // "كل الفترة": totals are exact from the SQL aggregates; load the full
+    // history so the transactions table shows every record too.
+    loadAllHistory().then(filterBranchDashboard);
+  } else {
+    filterBranchDashboard();
+  }
+}
+
 function filterBranchDashboard() {
   const filterSelect = document.getElementById('dashboard-branch-filter');
   if (!filterSelect) return;
   const branch = filterSelect.value;
   const allBranches = !branch || branch === 'الكل';
 
-  // Totals come from the SQL aggregates (stats / statsByBranch), so each branch
-  // shows its OWN revenue, and "كل الفروع" shows the sum — accurate even though
-  // the dashboard doesn't load every payment into memory.
-  const agg = allBranches ? stats : statsByBranch[branch] || { revenue: 0, expenses: 0 };
-  const totalIncome = num(agg.revenue);
-  const totalExpenses = num(agg.expenses);
+  // Branch + period scoping of the loaded history (used by the totals when a
+  // month period is picked, and by the transactions table below). A specific
+  // month picked in #dash-month overrides the this/last/all buttons.
+  const bounds = dashMonthBounds || periodBounds(dashPeriod);
+  let incomePayments = data.payments;
+  let expenses = data.expenses;
+  if (!allBranches) {
+    incomePayments = incomePayments.filter(p => p.branch === branch);
+    expenses = expenses.filter(e => e.branch === branch);
+  }
+  if (bounds) {
+    const inPeriod = r => {
+      const t = parseDate(r.date);
+      return t >= bounds.from && t <= bounds.to;
+    };
+    incomePayments = incomePayments.filter(inPeriod);
+    expenses = expenses.filter(inPeriod);
+  }
+
+  // Totals: with no period filter they come from the SQL aggregates
+  // (stats / statsByBranch) — exact even though the dashboard doesn't load
+  // every payment into memory. A month period sums the loaded records instead
+  // (setDashPeriod loads that month's window first).
+  let totalIncome, totalExpenses;
+  if (bounds) {
+    totalIncome = incomePayments.reduce((s, p) => s + num(p.amount), 0);
+    totalExpenses = expenses.reduce((s, e) => s + num(e.amount), 0);
+  } else {
+    const agg = allBranches ? stats : statsByBranch[branch] || { revenue: 0, expenses: 0 };
+    totalIncome = num(agg.revenue);
+    totalExpenses = num(agg.expenses);
+  }
   const profit = totalIncome - totalExpenses;
 
   const incEl = document.getElementById('branch-fin-income');
@@ -4548,20 +4840,32 @@ function filterBranchDashboard() {
   if (expEl) expEl.textContent = `${totalExpenses.toLocaleString()} ج.م`;
   if (profEl) profEl.textContent = `${profit.toLocaleString()} ج.م`;
 
-  // The top "إيرادات الشهر" card follows the selected branch (sum for "الكل").
+  // The red revenue card follows the selected branch + period, and can be
+  // narrowed to ONE revenue type via #dash-revenue-cat (else all revenue).
+  const catSel = document.getElementById('dash-revenue-cat');
+  const dashCat = catSel ? catSel.value : '';
+  // When a single type is chosen we must sum the loaded payments (the SQL
+  // aggregate only knows the grand total), so force an in-memory category sum.
+  const redIncome = dashCat
+    ? incomePayments.filter(p => revenueCategory(p) === dashCat).reduce((s, p) => s + num(p.amount), 0)
+    : totalIncome;
   const dashRev = document.getElementById('dash-revenue');
-  if (dashRev) dashRev.textContent = totalIncome.toLocaleString();
+  if (dashRev) dashRev.textContent = redIncome.toLocaleString();
+  const dashRevLabel = document.getElementById('dash-revenue-label');
+  if (dashRevLabel) {
+    dashRevLabel.textContent = dashCat
+      ? `إيرادات: ${REVENUE_CAT_LABELS[dashCat]} (ج.م)`
+      : 'الإيرادات حسب الفترة المختارة (ج.م)';
+  }
+
+  // Revenue split by type — computed from the same branch/period-scoped
+  // payments (so it reflects exactly what the totals above are built from).
+  renderRevenueBreakdown(incomePayments);
 
   const tbody = document.getElementById('branch-transactions-table');
   if (!tbody) return;
 
-  // Recent transactions list from whatever history is currently loaded, scoped.
-  let incomePayments = data.payments;
-  let expenses = data.expenses;
-  if (!allBranches) {
-    incomePayments = data.payments.filter(p => p.branch === branch);
-    expenses = data.expenses.filter(e => e.branch === branch);
-  }
+  // Transactions list from the branch/period-scoped history built above.
   const transactions = [
     ...incomePayments.map(p => ({
       type: 'إيراد',
@@ -4668,6 +4972,7 @@ const SPORTS = [
   'موياي تاي',
   'كالستانكس',
   'فيتنس تخصصي',
+  'رسم',
 ];
 
 // Sports that carry a per-player "level/stage" value, and how it's entered.
@@ -4684,6 +4989,52 @@ function sportLevelSpec(sport) {
 }
 function sportHasLevel(sport) {
   return !!sportLevelSpec(sport);
+}
+
+// English display names used ONLY on the printed card face (the app UI stays
+// Arabic). Falls back to the original text if a value isn't mapped.
+const SPORT_NAMES_EN = {
+  'جمباز فني': 'Artistic Gymnastics',
+  'جمباز ايروبك': 'Aerobic Gymnastics',
+  كاراتيه: 'Karate',
+  'كونغ فو ساندا': 'Kung Fu Sanda',
+  'كيك بوكس': 'Kickboxing',
+  تايكوندو: 'Taekwondo',
+  'كونغ فو اساليب': 'Kung Fu Styles',
+  ملاكمه: 'Boxing',
+  'موياي تاي': 'Muay Thai',
+  كالستانكس: 'Calisthenics',
+  'فيتنس تخصصي': 'Specialized Fitness',
+  رسم: 'Drawing',
+};
+const LEVEL_NAMES_EN = {
+  'قطاع مدارس': 'Schools',
+  'قطاع تجهيزي': 'Prep',
+  'قطاع فريق': 'Team',
+  مدارس: 'Schools',
+  تجهيزي: 'Prep',
+  فريق: 'Team',
+};
+const BRANCH_NAMES_EN = {
+  'فرع المريوطيه': 'Mariouteya Branch',
+  'فرع الحدايق': 'Hadayek Branch',
+  'فرع الهرم': 'Haram Branch',
+};
+function sportEn(sport) {
+  const s = (sport || '').trim();
+  return SPORT_NAMES_EN[s] || s;
+}
+function branchEn(branch) {
+  const b = (branch || '').trim();
+  return BRANCH_NAMES_EN[b] || b;
+}
+// English plan text for the card face: sport, plus the translated level in
+// parentheses when the sport carries one.
+function planTextEn(sport, level) {
+  const s = sportEn(sport);
+  const l = (level || '').trim();
+  if (sportHasLevel(sport) && l) return `${s} (${LEVEL_NAMES_EN[l] || l})`;
+  return s;
 }
 // The first of the chosen sports that carries a level (the app keeps ONE level).
 function leveledSport(sports) {
@@ -4803,9 +5154,9 @@ function branchColor(branch) {
 }
 
 // ==================== STRUCTURED CARD CODES ====================
-// Printed-card / QR format: BRANCH-SPORT-Uage[-SECTOR]-NUMBER
-//   general    : C-KA-U9-3001
-//   gymnastics : C-WAG-U9-T-1001   (T=فريق  P=تجهيزي  S=مدارس)
+// Printed-card / QR format: BRANCH-SPORT[-SECTOR]-NUMBER
+//   general    : C-KA-3001
+//   gymnastics : C-WAG-T-1001   (T=فريق  P=تجهيزي  S=مدارس)
 // NUMBER is each sport's own thousand-block (فني 1000+, ايروبك 2000+, كاراتيه
 // 3000+ ... skipping 10000 -> 11000, 12000), shared across all branches of that
 // sport. Old bare-numeric codes on already-registered players keep working.
@@ -4822,13 +5173,12 @@ const SPORT_CODES = {
   'موياي تاي': 'MT',
   كالستانكس: 'CL',
   'فيتنس تخصصي': 'FT',
+  رسم: 'DR',
 };
 // Gymnastics-only sector, appended as a single letter before the serial.
 const GYM_SECTOR_CODES = { فريق: 'T', تجهيزي: 'P', مدارس: 'S' };
 const GYM_SECTORS = Object.keys(GYM_SECTOR_CODES); // ['فريق','تجهيزي','مدارس']
 const GYM_SPORTS = ['جمباز فني', 'جمباز ايروبك'];
-// Age bands offered on the print form (U + age). U9 is the common default.
-const AGE_BANDS = ['U5', 'U6', 'U7', 'U8', 'U9', 'U10', 'U11', 'U12', 'U13', 'U14', 'U15', 'U16', 'U18'];
 // Reverse map (abbreviation -> sport name) for decoding a scanned code.
 const CODE_TO_SPORT = Object.fromEntries(Object.entries(SPORT_CODES).map(([name, ab]) => [ab, name]));
 function isGymSport(sport) {
@@ -4837,11 +5187,11 @@ function isGymSport(sport) {
 
 // Builds the code prefix (everything before the serial), or null if the branch
 // or sport has no abbreviation. Gymnastics gets the extra sector letter.
-function cardPrefix(branch, sport, ageBand, sector) {
+function cardPrefix(branch, sport, sector) {
   const b = BRANCH_CODES[branch];
   const s = SPORT_CODES[sport];
-  if (!b || !s || !ageBand) return null;
-  const parts = [b, s, ageBand];
+  if (!b || !s) return null;
+  const parts = [b, s];
   if (isGymSport(sport)) {
     const sec = GYM_SECTOR_CODES[sector];
     if (!sec) return null;
@@ -4850,11 +5200,11 @@ function cardPrefix(branch, sport, ageBand, sector) {
   return parts.join('-');
 }
 
-// Generates `n` full card codes for a print run: BRANCH-SPORT-Uage[-SECTOR]-NUMBER.
+// Generates `n` full card codes for a print run: BRANCH-SPORT[-SECTOR]-NUMBER.
 // The NUMBER is drawn from the sport's own thousand-block (see generateSportCodes),
 // so every card of a sport stays inside its block regardless of branch/age/sector.
-function generateStructuredCodes(branch, sport, ageBand, sector, n) {
-  const prefix = cardPrefix(branch, sport, ageBand, sector);
+function generateStructuredCodes(branch, sport, sector, n) {
+  const prefix = cardPrefix(branch, sport, sector);
   if (!prefix) return null;
   const nums = generateSportCodes(sport, n);
   if (!nums) return null;
@@ -4936,14 +5286,13 @@ function generateSportCodes(sport, n) {
 }
 
 // Prints branded blank cards for one (branch + sport + age band [+ gym sector]):
-// each card carries a structured sequential code (BRANCH-SPORT-Uage[-SECTOR]-####)
+// each card carries a structured sequential code (BRANCH-SPORT[-SECTOR]-####)
 // that encodes everything, plus a QR of that code and the sport's own colour.
 // Laid out 8 per A4 page (2×4). You write the player's name by hand, then enter
 // the card's code in "كود البطاقة" when you register that player.
 function printBlankCards() {
   const branch = val('blank-cards-branch');
   const sport = val('blank-cards-sport');
-  const ageBand = val('blank-cards-age');
   const sector = val('blank-cards-sector');
 
   if (!branch) {
@@ -4960,10 +5309,6 @@ function printBlankCards() {
     showNotification('اختر الرياضة أولاً', 'warning');
     return;
   }
-  if (!ageBand) {
-    showNotification('اختر المرحلة السنية', 'warning');
-    return;
-  }
   if (isGymSport(sport) && !sector) {
     showNotification('اختر القطاع (فريق/مدارس/تجهيزي) للجمباز', 'warning');
     return;
@@ -4974,7 +5319,7 @@ function printBlankCards() {
     return;
   }
 
-  const codes = generateStructuredCodes(branch, sport, ageBand, sector, qty);
+  const codes = generateStructuredCodes(branch, sport, sector, qty);
   if (!codes) {
     showNotification('تعذّر تكوين كود الكرت — تحقق من الاختيارات', 'danger');
     return;
@@ -4992,21 +5337,18 @@ function printBlankCards() {
  <div class="card-top">
  <div class="brand">
  <div class="club-name">El Wasl <span>Academy</span></div>
- <div class="club-sub">${esc(sport)}</div>
+ <div class="club-sub">${esc(sportEn(sport))}</div>
  </div>
  <img class="brand-logo" src="${logoUrl}" alt="" onerror="this.style.display='none'">
  </div>
  <div class="divider"></div>
  <div class="card-body">
  <div class="card-info">
- <div class="lbl">الفرع</div>
- <div class="member-plan">${esc(branch)}</div>
- <div class="lbl">الكود</div>
+ <div class="member-plan">${esc(branchEn(branch))}</div>
  <div class="member-code">${esc(code)}</div>
  </div>
  <div class="qr-box"><div class="qr" data-code="${esc(code)}"></div></div>
  </div>
- <div class="card-footer">يُستخدم هذا الكود لتسجيل الحضور عند الدخول</div>
  </div>` + back,
   );
 
@@ -5024,8 +5366,7 @@ function printBlankCards() {
   }
   win.document.write(`
  <html dir="rtl" lang="ar"><head><title>كروت ${esc(sport)} - ${esc(groupText)} - ${esc(branch)} (${qty})</title>
- <meta charset="UTF-8">
- <script src="${qrUrl}"><\/script>
+ <meta charset="UTF-8"> <script src="${qrUrl}"><\/script>
  <style>
  @page { size: A4; margin: 8mm; }
  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -5057,14 +5398,14 @@ function printBlankCards() {
  .member-code { font-size: 18px; font-family: 'Courier New', monospace; letter-spacing: 2px; color: ${color}; font-weight: 800; margin-top: 1mm; }
  .qr-box { background: #ffffff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm ${color}; }
  .card-footer { font-size: 6.5px; color: ${color}; text-align: center; z-index: 1; }
- .card-wm { position: absolute; width: 40mm; height: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.06; filter: brightness(0) invert(1); z-index: 0; }
- .card.back { justify-content: center; align-items: center; text-align: center; gap: 1.5mm; }
- .back-logo { height: 17mm; width: auto; z-index: 1; }
- .back-name { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 1px; z-index: 1; }
- .back-name span { color: ${color}; }
- .back-contacts { z-index: 1; margin-top: 1mm; }
- .bc { font-size: 8px; color: #D6DBE2; line-height: 1.75; letter-spacing: 0.3px; }
- .bc.bc-phones { color: ${color}; font-weight: 800; font-size: 9px; margin-bottom: 0.8mm; }
+ .card.back { justify-content: center; align-items: center; text-align: center; }
+ .back-logo { position: absolute; width: 46mm; height: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.14; z-index: 0; }
+ .back-edges { position: absolute; left: 5mm; right: 5mm; bottom: 4.5mm; display: flex; direction: ltr; justify-content: space-between; align-items: flex-end; z-index: 1; }
+ .edge { display: flex; flex-direction: column; gap: 0.6mm; }
+ .edge-left { align-items: flex-start; text-align: left; }
+ .edge-right { align-items: flex-end; text-align: right; }
+ .bc { font-size: 7.5px; color: #D6DBE2; letter-spacing: 0.2px; }
+ .bc.bc-phones { color: ${color}; font-weight: 800; font-size: 9px; }
  </style>
  </head>
  <body>
@@ -5500,10 +5841,40 @@ function renderFinancialDashboard() {
   }
 }
 
+// Quick period buttons: fill the from/to date inputs with the month's bounds
+// (so the user SEES the range being applied), load that window, then render.
+function fdSetPeriod(period) {
+  markPeriodButtons('fd', period);
+  const bounds = periodBounds(period);
+  const iso = t => {
+    const d = new Date(t);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  if (bounds) {
+    document.getElementById('fd-date-from').value = iso(bounds.from);
+    document.getElementById('fd-date-to').value = iso(bounds.to);
+    loadHistoryRange(bounds.from, bounds.to).then(renderFinancialDashboard);
+  } else {
+    document.getElementById('fd-date-from').value = '';
+    document.getElementById('fd-date-to').value = '';
+    if (!historyFullyLoaded) loadAllHistory().then(renderFinancialDashboard);
+    else renderFinancialDashboard();
+  }
+}
+
+// Editing a date by hand means a custom range — drop the period highlight.
+function clearFDPeriodHighlight() {
+  ['this', 'last', 'all'].forEach(p => {
+    const btn = document.getElementById(`fd-period-${p}`);
+    if (btn) btn.className = 'btn btn-sm btn-outline';
+  });
+}
+
 function resetFDFilters() {
   document.getElementById('fd-branch-filter').value = 'الكل';
   document.getElementById('fd-date-from').value = '';
   document.getElementById('fd-date-to').value = '';
+  clearFDPeriodHighlight();
   renderFinancialDashboard();
 }
 
@@ -5798,6 +6169,65 @@ function buildFinancialReport(branch) {
  </table>
  </div>
  `;
+}
+
+// A printable report for ONE revenue type (subscriptions, tournaments, medical,
+// sales, or other) — its own payments table + total. Respects the branch and
+// the report date-range already loaded into memory.
+function buildCategoryReport(catKey, branch) {
+  const label = REVENUE_CAT_LABELS[catKey] || catKey;
+  let rows = data.payments.filter(p => revenueCategory(p) === catKey);
+  if (branch) rows = rows.filter(p => (p.branch || 'غير محدد') === branch);
+  const total = rows.reduce((s, p) => s + num(p.amount), 0);
+
+  const bodyRows =
+    rows
+      .slice()
+      .sort((a, b) => parseDate(b.date) - parseDate(a.date))
+      .map(
+        p => `
+ <tr>
+ <td>${esc(p.name)}</td>
+ <td>${esc(p.plan || p.type)}</td>
+ <td>${esc(p.branch || 'غير محدد')}</td>
+ <td>${num(p.amount).toLocaleString()} ج.م</td>
+ <td>${esc(p.method)}</td>
+ <td>${esc(p.date)}</td>
+ <td>${esc(p.createdBy || '—')}</td>
+ </tr>`,
+      )
+      .join('') ||
+    '<tr><td colspan="7" style="text-align:center; color:#9aa1ab;">لا توجد إيرادات من هذا النوع</td></tr>';
+
+  return `
+ <div class="section-block">
+ <div class="report-title">تقرير إيرادات: ${esc(label)}</div>
+ <div class="summary-row">
+ ${summaryBox('إجمالي ' + label, `${total.toLocaleString()} ج.م`)}
+ ${summaryBox('عدد العمليات', rows.length)}
+ </div>
+ <table>
+ <thead><tr><th colspan="7" style="text-align:right; background:#B8901F;">${esc(label)}</th></tr><tr><th>الاسم</th><th>البيان</th><th>الفرع</th><th>المبلغ</th><th>طريقة الدفع</th><th>التاريخ</th><th>بواسطة</th></tr></thead>
+ <tbody>${bodyRows}</tbody>
+ </table>
+ </div>
+ `;
+}
+
+// Prints the report for the revenue type chosen in #report-cat, honouring the
+// per-branch / combined print mode like the other report buttons.
+function exportCategoryReport() {
+  const sel = document.getElementById('report-cat');
+  const catKey = sel ? sel.value : 'subscription';
+  const label = REVENUE_CAT_LABELS[catKey] || catKey;
+  if (reportScope() === 'combined') {
+    reportDoc(`تقرير إيرادات ${label} (مجمّع)`, buildCategoryReport(catKey, ''));
+  } else {
+    reportDoc(
+      `تقرير إيرادات ${label} (كل فرع في صفحة)`,
+      perBranchPages(b => buildCategoryReport(catKey, b), `تقرير إيرادات ${label}`),
+    );
+  }
 }
 
 function buildAttendanceReport(branch) {
@@ -6345,6 +6775,7 @@ const EMPLOYEE_SECTIONS = [
   'groups',
   'staff-attendance',
   'financial',
+  'extra-income',
   'salaries',
 ];
 
@@ -6461,8 +6892,30 @@ async function handleLogin(e) {
 }
 
 function logout() {
+  // Explicit logout also forgets the offline account (so the next person
+  // can't open the app offline with the previous user's session).
+  try {
+    localStorage.removeItem('last-user');
+  } catch (e) {
+    /* ignore */
+  }
   auth.signOut().catch(err => console.error('Logout error:', err));
-  // onAuthStateChanged will show the login screen again.
+  // onAuthStateChanged shows the login screen; do it directly too in case
+  // we're offline and the event never fires.
+  showLoginScreen();
+}
+
+// Offline fallback account: the LAST user who signed in on this device, used
+// only when there's no network to verify a session AND cached data exists.
+function offlineLastUser() {
+  if (navigator.onLine) return null;
+  try {
+    const last = JSON.parse(localStorage.getItem('last-user') || 'null');
+    if (last && last.email && localStorage.getItem('racer-data')) return last;
+  } catch (e) {
+    /* corrupted — fall through to the login screen */
+  }
+  return null;
 }
 
 function showLoginScreen() {
@@ -6475,6 +6928,12 @@ function showLoginScreen() {
 
 // Runs once after a user is authenticated: loads data and reveals the app.
 async function startApp(user) {
+  // Remember the last signed-in account so the app can open with it offline.
+  try {
+    localStorage.setItem('last-user', JSON.stringify({ email: user.email }));
+  } catch (e) {
+    /* storage full — non-critical */
+  }
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('loading-overlay').classList.remove('hidden');
 
@@ -6559,9 +7018,26 @@ document.addEventListener('DOMContentLoaded', () => {
   // Single source of truth for "is the user logged in?". Fires on load,
   // after login, after logout, and on token refresh.
   auth.onAuthStateChanged(user => {
-    if (user) startApp(user);
-    else showLoginScreen();
+    if (user) {
+      startApp(user);
+      return;
+    }
+    // No verified session. If we're OFFLINE and this device signed in
+    // before, open read/write with the last account (writes queue in the
+    // outbox and upload when the connection returns).
+    const last = offlineLastUser();
+    if (last) {
+      showNotification('وضع أوفلاين — تم الدخول بآخر حساب مسجّل على هذا الجهاز', 'warning');
+      startApp(last);
+    } else {
+      showLoginScreen();
+    }
   });
+
+  // Service worker: caches the app files so it opens with no internet.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed:', err));
+  }
 });
 
 // Close modal on overlay click

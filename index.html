@@ -1,1560 +1,2248 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ar" dir="rtl">
-<head>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1.0">
- <link rel="stylesheet" href="style.css">
- <link rel="icon" type="image/x-icon" href="src/logo-after.ico">
- <title>EL Wasl System</title>
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="style.css" />
+    <link rel="icon" type="image/x-icon" href="src/logo-after.ico" />
+    <title>EL Wasl System</title>
+  </head>
+  <body>
+    <!-- LOGIN SCREEN (shown until the user is authenticated) -->
+    <div class="login-screen hidden" id="login-screen">
+      <form class="login-card" id="login-form" autocomplete="on">
+        <div class="login-subtitle">تسجيل الدخول إلى لوحة الإدارة</div>
+        <div class="login-field">
+          <label for="login-email">البريد الإلكتروني</label>
+          <input type="email" id="login-email" autocomplete="username" placeholder="admin@example.com" />
+        </div>
+        <div class="login-field">
+          <label for="login-password">كلمة المرور</label>
+          <input type="password" id="login-password" autocomplete="current-password" placeholder="••••••••" />
+        </div>
+        <div class="login-error" id="login-error"></div>
+        <button type="submit" class="btn btn-primary login-btn" id="login-btn">تسجيل الدخول</button>
+      </form>
+    </div>
 
-<!-- LOGIN SCREEN (shown until the user is authenticated) -->
-<div class="login-screen hidden" id="login-screen">
- <form class="login-card" id="login-form" autocomplete="on">
- <div class="login-subtitle">تسجيل الدخول إلى لوحة الإدارة</div>
- <div class="login-field">
- <label for="login-email">البريد الإلكتروني</label>
- <input type="email" id="login-email" autocomplete="username" placeholder="admin@example.com">
- </div>
- <div class="login-field">
- <label for="login-password">كلمة المرور</label>
- <input type="password" id="login-password" autocomplete="current-password" placeholder="••••••••">
- </div>
- <div class="login-error" id="login-error"></div>
- <button type="submit" class="btn btn-primary login-btn" id="login-btn">تسجيل الدخول</button>
- </form>
-</div>
+    <!-- LOADING OVERLAY (shown until data finishes loading from Firestore) -->
+    <div class="loading-overlay" id="loading-overlay">
+      <div class="loading-box">جاري تحميل البيانات من قاعدة البيانات...</div>
+    </div>
 
-<!-- LOADING OVERLAY (shown until data finishes loading from Firestore) -->
-<div class="loading-overlay" id="loading-overlay">
- <div class="loading-box">جاري تحميل البيانات من قاعدة البيانات...</div>
-</div>
+    <!-- NOTIFICATION -->
+    <div class="notification" id="notification">
+      <span id="notif-text">تم بنجاح</span>
+    </div>
 
-<!-- NOTIFICATION -->
-<div class="notification" id="notification">
- <span id="notif-text">تم بنجاح</span>
-</div>
+    <!-- MODAL -->
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" id="modal-content">
+        <div class="modal-title">
+          <span id="modal-title-text">تفاصيل</span>
+          <span class="modal-close" onclick="closeModal()"></span>
+        </div>
+        <div id="modal-body"></div>
+      </div>
+    </div>
 
-<!-- MODAL -->
-<div class="modal-overlay" id="modal-overlay">
- <div class="modal" id="modal-content">
- <div class="modal-title">
- <span id="modal-title-text">تفاصيل</span>
- <span class="modal-close" onclick="closeModal()"></span>
- </div>
- <div id="modal-body"></div>
- </div>
-</div>
-
-<!-- HEADER -->
-<header id="app-header" style="display:none;">
- <button class="hamburger" id="hamburger-btn" onclick="toggleSidebar()" aria-label="القائمة">☰</button>
- <div class="logo"><img src="src/logo-after.png" alt="" class="logo-img" onerror="this.style.display='none'"><span style="color: #D4AF37;"></span></div>
- <div class="header-info">
- <div class="date-display" id="current-date"></div>
- <!-- Per-device branch: pin this device to one branch so it only loads
+    <!-- HEADER -->
+    <header id="app-header" style="display: none">
+      <button class="hamburger" id="hamburger-btn" onclick="toggleSidebar()" aria-label="القائمة">☰</button>
+      <div class="logo">
+        <img src="src/logo-after.png" alt="" class="logo-img" onerror="this.style.display = 'none'" /><span
+          style="color: #d4af37"
+        ></span>
+      </div>
+      <div class="header-info">
+        <!-- Offline/outbox indicator: hidden when online with nothing pending -->
+        <span
+          id="outbox-status"
+          class="outbox-chip"
+          style="display: none"
+          onclick="flushOutbox()"
+          title="اضغط لمحاولة الرفع الآن"
+        ></span>
+        <div class="date-display" id="current-date"></div>
+        <!-- Per-device branch: pin this device to one branch so it only loads
  that branch's data (much fewer reads). "كل الفروع" loads everything. -->
- <select id="device-branch-select" style="padding: 8px 35px;" class="btn btn-outline btn-sm" onchange="onDeviceBranchChange(this.value)" title="الفرع الذي يعمل عليه هذا الجهاز">
- <option value="">كل الفروع</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- <div class="date-display" id="current-user">Admin</div>
- <button class="btn btn-outline btn-sm" id="logout-btn" onclick="logout()">تسجيل الخروج</button>
- </div>
-</header>
-
-<div class="app-container" id="app-container" style="display:none;">
- <!-- Backdrop behind the mobile off-canvas sidebar -->
- <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
- <!-- SIDEBAR -->
- <nav class="sidebar" id="sidebar">
- <div class="sidebar-title">القائمة الرئيسية</div>
-
- <div class="nav-item active" data-section="dashboard" onclick="showSection('dashboard')"> <span class="nav-text">لوحة التحكم</span>
- </div>
-
- <div class="nav-item" data-section="registration" onclick="showSection('registration')"> <span class="nav-text">اللاعبين</span>
- </div>
-
- <div class="nav-item" data-section="trials" onclick="showSection('trials')"> <span class="nav-text">الاختبارات</span>
- </div>
-
- <div class="nav-item" data-section="attendance" onclick="showSection('attendance')"> <span class="nav-text">الحضور</span>
- </div>
-
- <div class="nav-item" data-section="sessions" onclick="showSection('sessions')"> <span class="nav-text">SESSIONS</span>
- </div>
-
- <div class="nav-item" data-section="groups" onclick="showSection('groups')"> <span class="nav-text">المجموعات</span>
- </div>
-
- <div class="nav-item" data-section="coaches" onclick="showSection('coaches')"> <span class="nav-text">المدربين</span>
- </div>
-
- <div class="nav-item" data-section="staff-attendance" onclick="showSection('staff-attendance')"> <span class="nav-text">حضور الموظفين</span>
- </div>
-
- <div class="nav-item" data-section="financial" onclick="showSection('financial')"> <span class="nav-text">تجديد الاشتراكات</span><span id="refunds-nav-badge" class="nav-count-badge" style="display:none;" title="طلبات استرداد معلّقة">0</span>
- </div>
-
- <div class="nav-item" data-section="salaries" onclick="showSection('salaries')"> <span class="nav-text">الشؤون المالية</span>
- </div>
-
- <div class="nav-item" data-section="financial-dashboard" onclick="showSection('financial-dashboard')"> <span class="nav-text">لوحة التحكم المالية</span>
- </div>
-
- <div class="nav-item" data-section="reports" onclick="showSection('reports')"> <span class="nav-text">التقارير</span>
- </div>
- </nav>
-
- <!-- MAIN CONTENT -->
- <main class="main-content">
-
- <!-- ==================== DASHBOARD ==================== -->
- <div class="section active" id="section-dashboard">
- <div class="page-title">
- <h2>لوحة التحكم الرئيسية</h2>
- <p>نظرة عامة على جميع الأقسام</p>
- </div>
-
- <div class="stats-grid">
- <div class="stat-card blue">
- <div class="stat-value" id="dash-total">0</div>
- <div class="stat-label" style="color: black;">إجمالي اللاعبين</div>
- </div>
- <div class="stat-card green">
- <div class="stat-value" id="dash-active">0</div>
- <div class="stat-label">اشتراكات نشطة</div>
- </div>
- <div class="stat-card yellow">
- <div class="stat-value" id="dash-subs">0</div>
- <div class="stat-label">إجمالي الاشتراكات</div>
- </div>
- <div class="stat-card red">
- <div class="stat-value" id="dash-revenue">0</div>
- <div class="stat-label">إيرادات الشهر (ج.م)</div>
- </div>
- </div>
-
- <!-- Expiry Alerts -->
- <div class="card" id="alerts-card" style="display:none;">
- <div class="card-title" style="color: var(--warning);">تنبيهات اشتراكات قريبة من الانتهاء</div>
- <div id="expiry-alerts" style="display: flex; flex-direction: column; gap: 10px;"></div>
- </div>
-
- <!-- Absence Alerts -->
- <div class="card" id="absentees-card" style="display:none;">
- <div class="card-title" style="color: var(--danger);">تنبيهات: لاعبون منقطعون عن الحضور</div>
- <div id="absentees-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
- </div>
-
- <!-- Quick Actions -->
- <div class="card">
- <div class="card-title">إجراءات سريعة</div>
- <div style="display: flex; gap: 15px; flex-wrap: wrap;">
- <button class="btn btn-primary" onclick="showSection('registration')">تسجيل لاعب جديد
- </button>
- <button class="btn btn-success" onclick="showSection('attendance')">تسجيل الحضور
- </button>
- <button class="btn btn-warning" onclick="showSection('financial')">تجديد اشتراك
- </button>
- <button class="btn btn-outline" onclick="showSection('reports')">عرض التقارير
- </button>
- </div>
- </div>
-
- <!-- Recent Registrations -->
- <div class="card">
- <div class="card-title">آخر التسجيلات</div>
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>الكود</th>
- <th>الاسم</th>
- <th>النوع</th>
- <th>الحالة</th>
- <th>باقي على الانتهاء</th>
- </tr>
- </thead>
- <tbody id="recent-registrations">
- <tr>
- <td colspan="5" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد تسجيلات بعد
- </td>
- </tr>
- </tbody>
- </table>
- </div>
- </div>
-
- <!-- ==================== BRANCH PROFITS & CASH FLOW ==================== -->
- <div class="card" id="branch-profits-card" style="margin-top: 20px;">
- <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; border-bottom: 1px solid rgba(48,56,65,0.1); padding-bottom: 15px;">
- <div>
- <h3 style="font-size: 18px; font-weight: 700; color: var(--accent);">تفاصيل الأرباح والخزينة بالفروع</h3>
- <p style="color: rgba(48,56,65,0.5); font-size: 12px; margin-top: 3px;">متابعة الإيرادات والمصروفات وصافي الربح لكل فرع</p>
- </div>
- <div class="form-group" style="margin-bottom: 0; min-width: 200px;">
- <select id="dashboard-branch-filter" onchange="filterBranchDashboard()" style="padding: 8px 35px; border-radius: 8px; border: 1px solid var(--gold); font-weight: 600; width: 100%;">
- <option value="الكل">كل الفروع (الكل)</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- </div>
-
- <div class="financial-summary" style="margin-bottom: 25px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); display: grid; gap: 20px;">
- <div class="fin-card" style="background: rgba(63, 143, 111, 0.05); border: 1px solid rgba(63, 143, 111, 0.15); border-radius: 12px; padding: 20px; text-align: center;">
- <div class="fin-amount" style="color: var(--success); font-size: 24px; font-weight: 800;" id="branch-fin-income">0 ج.م</div>
- <div class="fin-label" style="font-size: 13px; color: rgba(48,56,65,0.6); margin-top: 5px;">إجمالي الإيرادات</div>
- </div>
- <div class="fin-card" style="background: rgba(181, 69, 60, 0.05); border: 1px solid rgba(181, 69, 60, 0.15); border-radius: 12px; padding: 20px; text-align: center;">
- <div class="fin-amount" style="color: var(--danger); font-size: 24px; font-weight: 800;" id="branch-fin-expenses">0 ج.م</div>
- <div class="fin-label" style="font-size: 13px; color: rgba(48,56,65,0.6); margin-top: 5px;">إجمالي المصروفات</div>
- </div>
- <div class="fin-card" style="background: rgba(192, 138, 46, 0.05); border: 1px solid rgba(192, 138, 46, 0.15); border-radius: 12px; padding: 20px; text-align: center;">
- <div class="fin-amount" style="color: var(--warning); font-size: 24px; font-weight: 800;" id="branch-fin-profit">0 ج.م</div>
- <div class="fin-label" style="font-size: 13px; color: rgba(48,56,65,0.6); margin-top: 5px;">صافي الربح</div>
- </div>
- </div>
-
- <div>
- <h4 style="font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--accent);">حركة المعاملات المالية (إيرادات ومصروفات)</h4>
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>النوع</th>
- <th>البيان</th>
- <th>الفرع</th>
- <th>المبلغ</th>
- <th>التاريخ</th>
- <th>بواسطة</th>
- </tr>
- </thead>
- <tbody id="branch-transactions-table">
- <tr>
- <td colspan="6" style="text-align:center; color: rgba(48,56,65,0.3); padding: 20px;">لا توجد معاملات مالية مسجلة</td>
- </tr>
- </tbody>
- </table>
- </div>
- </div>
- </div>
-
- </div>
-
- <!-- ==================== REGISTRATION ==================== -->
- <div class="section" id="section-registration">
- <div class="page-title">
- <h2>قسم التسجيل</h2>
- <p>تسجيل لاعبين جدد باشتراك</p>
- </div>
-
- <!-- Registration Form -->
- <div class="card">
- <div class="card-title">بيانات اللاعب</div>
- <div class="form-grid">
- <div class="form-group">
- <label>الاسم الكامل *</label>
- <input type="text" id="reg-name" placeholder="أدخل الاسم الكامل">
- </div>
- <div class="form-group">
- <label>رقم الهاتف *</label>
- <input type="tel" id="reg-phone" placeholder="01XXXXXXXXX">
- </div>
- <div class="form-group">
- <label>السن</label>
- <input type="number" id="reg-age" placeholder="العمر بالسنوات">
- </div>
- <div class="form-group">
- <label>الجنس</label>
- <select id="reg-gender">
- <option value="ولد">ولد</option>
- <option value="بنت">بنت</option>
- </select>
- </div>
-
- <!-- Subscription Only Fields -->
- <div class="form-group sub-only">
- <label>نوع الرياضة (يمكن اختيار أكثر من لعبة)</label>
- <div style="display:flex; gap:8px;">
- <select id="reg-sport" onchange="toggleSportLevel()" style="flex:1;"></select>
- <button type="button" class="btn btn-outline btn-sm" onclick="addRegSport()">➕ أضف لعبة</button>
- </div>
- <div id="reg-sports-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
- </div>
- <div class="form-group sub-only" id="reg-level-group" style="display:none;"></div>
- <div class="form-group sub-only">
- <label>الفريق / المرحلة (يدوي)</label>
- <input type="text" id="reg-stage" placeholder="مثال: فريق تحت 8 / تحت 7">
- </div>
- <div class="form-group sub-only">
- <label>المدرب المسؤول</label>
- <select id="reg-trainer" onchange="populateRegGroupSelect()"><option value="غير محدد">— غير محدد —</option></select>
- </div>
- <div class="form-group sub-only">
- <label>جروب الكابتن (اختياري)</label>
- <select id="reg-group"><option value="">— بدون جروب —</option></select>
- </div>
- <div class="form-group sub-only">
- <label>تاريخ بداية الاشتراك</label>
- <input type="date" id="reg-start-date">
- </div>
- <div class="form-group sub-only" id="reg-duration-group">
- <label>مدة الاشتراك (بالأيام)</label>
- <input type="number" id="reg-duration" placeholder="مثال: 30" value="30">
- </div>
- <div class="form-group sub-only" id="reg-sessions-group">
- <label>عدد الحصص في الشهر</label>
- <input type="number" id="reg-sessions" placeholder="يُملأ تلقائياً حسب اللعبة — قابل للتعديل">
- </div>
- <div class="form-group sub-only">
- <label>السعر الإجمالي للاشتراك</label>
- <input type="number" id="reg-total" placeholder="السعر الكامل (للدفع على مراحل)">
- </div>
- <div class="form-group sub-only">
- <label>المبلغ المدفوع الآن</label>
- <input type="number" id="reg-amount" placeholder="المبلغ المدفوع">
- </div>
- <div class="form-group sub-only">
- <label>طريقة الدفع</label>
- <select id="reg-method"></select>
- </div>
- <div class="form-group">
- <label>الفرع *</label>
- <select id="reg-branch">
- <option value="" disabled selected>اختر الفرع</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- <div class="form-group">
- <label>كود البطاقة </label>
- <div style="display:flex; gap:8px;">
- <input type="text" id="reg-card-code" placeholder="أدخل كود الكرت المطبوع أو اتركه للتوليد التلقائي" style="flex:1;">
- <button type="button" class="btn btn-outline btn-sm" onclick="addRegCode()">➕ أضف كود</button>
- </div>
- <div id="reg-codes-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
- </div>
- <div class="form-group">
- <label>المصدر</label>
- <select id="reg-source">
- <option value="" disabled selected>اختر المصدر</option>
- <option value="سوشيال ميديا">سوشيال ميديا</option>
- <option value="معرفة">معرفة / توصية</option>
- <option value="زيارة مباشرة">زيارة مباشرة</option>
- </select>
- </div>
- <div class="form-group">
- <label>ملاحظات</label>
- <input type="text" id="reg-notes" placeholder="أي ملاحظات إضافية">
- </div>
-
- <!-- Optional add-on services (part of the trainee's data) -->
- <div style="grid-column: 1 / -1; border-top: 1px solid rgba(48,56,65,0.1); margin-top: 6px; padding-top: 14px;">
- <div style="font-weight: 700; color: var(--accent); margin-bottom: 4px;">خدمات إضافية (اختياري)</div>
- <p style="color: rgba(48,56,65,0.5); font-size: 12px; margin-bottom: 12px;">فعّل الخدمة وأدخل سعرها — تُحتسب كإيراد، وتظهر ضمن بيانات اللاعب القابلة للتعديل.</p>
- <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
- <div class="addon-box">
- <label style="display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:8px;">
- <input type="checkbox" id="addon-test" style="width:18px; height:18px;"> اختبارات
- </label>
- <input type="number" id="addon-test-price" placeholder="السعر (يدوي)">
- </div>
- <div class="addon-box">
- <label style="display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:8px;">
- <input type="checkbox" id="addon-belt" style="width:18px; height:18px;"> اختبار حزام
- </label>
- <input type="number" id="addon-belt-price" placeholder="السعر (يدوي)">
- </div>
- <div class="addon-box">
- <label style="display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:8px;">
- <input type="checkbox" id="addon-tournament" style="width:18px; height:18px;"> بطولات
- </label>
- <input type="number" id="addon-tournament-price" placeholder="السعر (يدوي)">
- </div>
- <div class="addon-box">
- <label style="display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:8px;">
- <input type="checkbox" id="addon-locker" style="width:18px; height:18px;"> إيجار لوكر
- </label>
- <input type="number" id="addon-locker-price" value="150">
- </div>
- <div class="addon-box">
- <label style="display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:8px;">
- <input type="checkbox" id="addon-internet" style="width:18px; height:18px;"> اشتراك انترنت
- </label>
- <input type="number" id="addon-internet-price" value="100">
- </div>
- </div>
- </div>
- </div>
-
- <div style="margin-top: 20px; display: flex; gap: 10px;">
- <button class="btn btn-primary" onclick="registerTrainee()">تسجيل اللاعب
- </button>
- <button class="btn btn-outline" onclick="clearForm()">مسح البيانات
- </button>
- </div>
-
- <!-- ID Display -->
- <div class="id-display" id="id-result">
- <div style="font-size: 13px; color: rgba(48,56,65,0.5); margin-bottom: 10px;">تم التسجيل بنجاح! كود اللاعب:
- </div>
- <div class="id-code" id="generated-id">--</div>
- <div style="font-size: 12px; color: rgba(48,56,65,0.4); margin-top: 10px;">احتفظ بهذا الكود لتسجيل الحضور
- </div>
- <button class="btn btn-outline btn-sm" style="margin-top: 15px;" onclick="printID()">طباعة بطاقة العضوية
- </button>
- </div>
- </div>
-
- <!-- Trainees List -->
- <div class="card">
- <div class="card-title">قائمة اللاعبين المسجلين</div>
- <div class="search-bar" style="flex-wrap: wrap;">
- <input type="text" id="search-trainees" placeholder="ابحث باسم أو كود..."
- oninput="filterTrainees()" style="flex: 1; min-width: 180px;">
- <select id="filter-sport" onchange="onSportFilterChange()" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--secondary); min-width: 150px;">
- <option value="الكل">كل الرياضات</option>
- </select>
- <select id="filter-trainer" onchange="filterTrainees()" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--secondary); min-width: 150px;">
- <option value="الكل">كل المدربين</option>
- </select>
- <button class="btn btn-outline" onclick="resetTraineeFilters()">إلغاء الفلتر</button>
- <button class="btn btn-outline" onclick="exportData()">تصدير</button>
- <button class="btn btn-primary" onclick="printTraineeCardsSheet()" title="يجمع كل كروت اللاعبين على ورقات A4 بمقاسها الصحيح مع خطوط قص — جاهزة للمطبعة">🖨️ طباعة كل الكروت (A4)</button>
- </div>
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>الكود</th>
- <th>الاسم</th>
- <th>الهاتف</th>
- <th>النوع</th>
- <th>الفرع</th>
- <th>الرياضة</th>
- <th>الحالة</th>
- <th>باقي على الانتهاء</th>
- <th>بواسطة</th>
- <th>إجراءات</th>
- </tr>
- </thead>
- <tbody id="trainees-table">
- <tr>
- <td colspan="10" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا يوجد لاعبون مسجلون بعد
- </td>
- </tr>
- </tbody>
- </table>
- </div>
- </div>
-
- <!-- Blank branded cards / barcodes -->
- <div class="card">
- <div class="card-title">طباعة كروت بأكواد جاهزة</div>
- <p style="color: rgba(48,56,65,0.5); font-size: 13px; margin-bottom: 14px;">كل كرت يُطبع عليه كود منظّم فريد بالشكل <b>الفرع-الرياضة-المرحلة-التسلسل</b> (مثال: <code>C-KA-U9-0001</code>، والجمباز <code>C-WAG-U9-T-0001</code>) + QR. تكتب الاسم يدوياً، وعند تسجيل اللاعب تُدخل كود الكرت في خانة "كود البطاقة". لا يمكن لفرع طباعة كروت فرع آخر.</p>
- <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
- <div class="form-group" style="max-width: 200px; margin-bottom: 0;">
- <label>الفرع</label>
- <select id="blank-cards-branch"></select>
- </div>
- <div class="form-group" style="max-width: 200px; margin-bottom: 0;">
- <label>الرياضة</label>
- <select id="blank-cards-sport" onchange="onBlankSportChange()"></select>
- </div>
- <div class="form-group" style="max-width: 140px; margin-bottom: 0;">
- <label>المرحلة السنية</label>
- <select id="blank-cards-age"></select>
- </div>
- <div class="form-group" id="blank-cards-sector-group" style="max-width: 170px; margin-bottom: 0; display: none;">
- <label>القطاع (جمباز)</label>
- <select id="blank-cards-sector"></select>
- </div>
- <div class="form-group" style="max-width: 140px; margin-bottom: 0;">
- <label>عدد الكروت</label>
- <input type="number" id="blank-cards-qty" value="10" min="1" max="1000">
- </div>
- <button class="btn btn-primary" onclick="printBlankCards()">طباعة الكروت</button>
- </div>
- </div>
-
- </div>
-
- <!-- ==================== TRIALS (free test players) ==================== -->
- <div class="section" id="section-trials">
- <div class="page-title">
- <h2>اللاعبون التجريبيون</h2>
- <p>الحصص التجريبية المجانية — سجّل اللاعب التجريبي، ثم اقبله لتحويله لمشترك أو ارفضه</p>
- </div>
-
- <!-- Trial registration (free, data only) -->
- <div class="card">
- <div class="card-title">تسجيل لاعب تجريبي (مجاني)</div>
- <div class="form-grid">
- <div class="form-group">
- <label>الاسم الكامل *</label>
- <input type="text" id="trial-name" placeholder="أدخل الاسم الكامل">
- </div>
- <div class="form-group">
- <label>رقم الهاتف *</label>
- <input type="tel" id="trial-phone" placeholder="01XXXXXXXXX">
- </div>
- <div class="form-group">
- <label>العمر</label>
- <input type="number" id="trial-age" placeholder="العمر بالسنوات">
- </div>
- <div class="form-group">
- <label>النوع</label>
- <select id="trial-gender">
- <option value="ولد">ولد</option>
- <option value="بنت">بنت</option>
- </select>
- </div>
- <div class="form-group">
- <label>الفرع *</label>
- <select id="trial-branch">
- <option value="" disabled selected>اختر الفرع</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- <div class="form-group">
- <label>اللاعب جه من طرف إيه؟</label>
- <select id="trial-source">
- <option value="" disabled selected>اختر المصدر</option>
- <option value="سوشيال ميديا">سوشيال ميديا</option>
- <option value="معرفة">معرفة / توصية</option>
- <option value="زيارة مباشرة">زيارة مباشرة (لقاها عادي)</option>
- </select>
- </div>
- <div class="form-group">
- <label>ملاحظات</label>
- <input type="text" id="trial-notes" placeholder="أي ملاحظات إضافية">
- </div>
- </div>
- <button class="btn btn-primary" style="margin-top: 16px;" onclick="registerTrial()">تسجيل اللاعب التجريبي</button>
- </div>
-
- <div class="card">
- <div class="card-title">قائمة اللاعبين التجريبيين</div>
- <input type="text" class="table-filter" placeholder="🔍 بحث عن لاعب تجريبي (اسم / هاتف / فرع)..." oninput="filterTableRows(this, 'trials-table')">
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>الكود</th>
- <th>الاسم</th>
- <th>الهاتف</th>
- <th>الفرع</th>
- <th>تاريخ التسجيل</th>
- <th>الحالة</th>
- <th>بواسطة</th>
- <th>إجراءات</th>
- </tr>
- </thead>
- <tbody id="trials-table">
- <tr>
- <td colspan="8" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا يوجد لاعبون تجريبيون</td>
- </tr>
- </tbody>
- </table>
- </div>
- </div>
- </div>
-
- <!-- ==================== ATTENDANCE ==================== -->
- <div class="section" id="section-attendance">
- <div class="page-title">
- <h2>قسم الحضور</h2>
- <p>تسجيل ومتابعة حضور اللاعبين</p>
- </div>
-
- <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
- <!-- Scanner -->
- <div class="card">
- <div class="card-title">إدخال كود الحضور</div>
- <div class="scanner-area">
- <p style="color: rgba(48,56,65,0.5); margin-bottom: 15px;">أدخل كود اللاعب لتسجيل الحضور
- </p>
- </div>
- <div class="form-group" style="margin-bottom: 15px;">
- <input type="text" id="attendance-code"
- placeholder="مثال: Wasl-0427"
- oninput="onAttendanceInput()"
- autocomplete="off"
- style="text-align: center; font-size: 18px; font-family: monospace; letter-spacing: 2px;">
- <p style="color: rgba(48,56,65,0.4); font-size: 12px; text-align:center; margin-top:8px;">يتم تسجيل الحضور تلقائياً بمجرد إدخال الكود</p>
- </div>
- <button class="btn btn-success" style="width: 100%;" onclick="recordAttendance()">تسجيل الحضور يدوياً
- </button>
-
- <!-- Result -->
- <div class="attendance-result" id="attendance-result"></div>
- </div>
-
- <!-- Today Stats -->
- <div class="card">
- <div class="card-title">إحصائيات اليوم</div>
- <div style="display: flex; flex-direction: column; gap: 15px;">
- <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(48,56,65,0.03); border-radius: 10px;">
- <span style="color: rgba(48,56,65,0.6);">حاضرين اليوم</span>
- <span style="font-size: 24px; font-weight: 700; color: var(--success);" id="today-present">0</span>
- </div>
- <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(48,56,65,0.03); border-radius: 10px;">
- <span style="color: rgba(48,56,65,0.6);">غياب</span>
- <span style="font-size: 24px; font-weight: 700; color: var(--danger);" id="today-absent">0</span>
- </div>
- <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background: rgba(48,56,65,0.03); border-radius: 10px;">
- <span style="color: rgba(48,56,65,0.6);">نسبة الحضور</span>
- <span style="font-size: 24px; font-weight: 700; color: var(--warning);" id="attendance-rate">0%</span>
- </div>
- </div>
- </div>
- </div>
-
- <!-- Attendance Log -->
- <div class="card">
- <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
- <div class="card-title" style="margin:0;">سجل الحضور - اليوم</div>
- <button class="btn btn-outline btn-sm" onclick="loadAllHistory()" title="افتراضياً يُعرض سجل آخر 14 يوم فقط لتوفير الاستهلاك. اضغط لتحميل كل الفترة.">📂 تحميل كل السجل (الفترة كاملة)</button>
- </div>
- <p style="color: rgba(48,56,65,0.4); font-size: 12px; margin: 6px 0 14px;">يُعرض سجل آخر 14 يوم افتراضياً لتقليل استهلاك قاعدة البيانات.</p>
- <input type="text" class="table-filter" placeholder="🔍 بحث في الحضور (اسم / كود)..." oninput="filterTableRows(this, 'attendance-log')">
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>#</th>
- <th>الكود</th>
- <th>الاسم</th>
- <th>وقت الحضور</th>
- <th>الحالة</th>
- </tr>
- </thead>
- <tbody id="attendance-log">
- <tr>
- <td colspan="5" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد سجلات حضور لليوم
- </td>
- </tr>
- </tbody>
- </table>
- </div>
- </div>
- </div>
-
- <!-- ==================== SESSIONS ==================== -->
- <div class="section" id="section-sessions">
- <div class="page-title">
- <h2>الجلسات (الحصص الجارية)</h2>
- <p>إدارة الجلسات الحالية لكل فرع — اختر الفرع أولاً لتجنّب اللغبطة</p>
- </div>
-
- <div class="card">
- <div class="card-title">اختر الفرع</div>
- <div class="form-group" style="max-width: 340px;">
- <label>الفرع</label>
- <select id="session-branch-filter" onchange="renderSessionsList()">
- <option value="">— اختر الفرع لعرض جلساته —</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- </div>
-
- <div class="card" id="session-schedule-card" style="display:none;">
- <div class="card-title">جدول المدربين — حدد أيام كل مدرب وميعاده</div>
- <p style="color: rgba(48,56,65,0.5); font-size: 13px; margin-bottom: 14px;">علّم على أيام التمرين في الأسبوع لكل مدرب وحدد ميعاد بدايته، ثم رتّب طابور اليوم بالأسهم وابدأ الجلسات منه مباشرة.</p>
- <div id="coach-schedule-list"></div>
- <div class="card-title" style="margin-top: 20px;">طابور اليوم — مين هيبدأ الأول</div>
- <div id="today-lineup"></div>
- </div>
-
- <div class="card" id="session-create-card" style="display:none;">
- <div class="card-title">بدء جلسة جديدة</div>
- <div class="form-grid">
- <div class="form-group">
- <label>اسم الجلسة</label>
- <input type="text" id="session-name" placeholder="اختياري — يتولّد تلقائياً">
- </div>
- <div class="form-group">
- <label>نوع الجلسة</label>
- <select id="session-type" onchange="onSessionTypeChange()">
- <option value="">حصة جماعية</option>
- <option value="private">تمرين برايفت</option>
- </select>
- </div>
- <div class="form-group" id="session-price-group" style="display:none;">
- <label>سعر البرايفت</label>
- <input type="number" id="session-price" placeholder="سعر الحصة (ج.م)">
- </div>
- <div class="form-group">
- <label>الرياضة</label>
- <select id="session-sport"></select>
- </div>
- <div class="form-group">
- <label>الجروب</label>
- <select id="session-group" onchange="onSessionGroupChange()"></select>
- </div>
- <div class="form-group">
- <label>المدرب</label>
- <select id="session-coach"></select>
- </div>
- <div class="form-group">
- <label>الموعد</label>
- <input type="time" id="session-time">
- </div>
- </div>
- <button class="btn btn-primary" style="margin-top: 16px;" onclick="createSession()">بدء الجلسة</button>
- </div>
-
- <div class="card" id="session-list-card" style="display:none;">
- <div class="card-title" style="justify-content: space-between;">
- <span>جلسات اليوم بالترتيب</span>
- <button class="btn btn-outline btn-sm" onclick="sortSessionsByTime()">ترتيب حسب الموعد</button>
- </div>
- <div id="sessions-list" style="display:flex; flex-direction:column; gap:12px;"></div>
- </div>
- </div>
-
- <!-- ==================== GROUPS ==================== -->
- <div class="section" id="section-groups">
- <div class="page-title">
- <h2>الجروبات والمدربين</h2>
- <p>تنظيم اللاعبين في مجموعات وتحضيرهم جماعياً</p>
- </div>
-
- <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
- <!-- Create Group -->
- <div class="card">
- <div class="card-title">إنشاء جروب جديد</div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>اسم الجروب</label>
- <input type="text" id="group-name" placeholder="مثال: جروب الناشئين">
- </div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>المدرب المسؤول</label>
- <select id="group-trainer"></select>
- </div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>الفرع *</label>
- <select id="group-branch">
- <option value="" disabled selected>اختر الفرع</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- <button class="btn btn-primary" style="width: 100%;" onclick="createGroup()">إنشاء الجروب</button>
- </div>
-
- <!-- Student Alerts -->
- <div class="card">
- <div class="card-title" style="color: var(--danger);">تنبيهات الطلاب (انقطاع / اشتراكات)</div>
- <div id="student-alerts" style="display:flex; flex-direction:column; gap:10px; max-height: 360px; overflow-y: auto;"></div>
- </div>
- </div>
-
- <!-- Groups List -->
- <div class="card">
- <div class="card-title">الجروبات</div>
- <div id="groups-list" class="groups-grid"></div>
- </div>
- </div>
-
- <!-- ==================== STAFF ATTENDANCE ==================== -->
- <div class="section" id="section-staff-attendance">
- <div class="page-title">
- <h2>حضور الموظفين والمدربين</h2>
- <p>تسجيل حضور وانصراف الموظفين، وطباعة تقرير يومي لكل فرع</p>
- </div>
-
- <div class="card">
- <div class="card-title">تسجيل سريع بالكود</div>
- <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
- <div class="form-group" style="flex:1; min-width:220px; margin-bottom:0;">
- <label>كود الموظف / المدرب (حضور أو انصراف)</label>
- <input type="text" id="staff-code" placeholder="مثال: Staff-0123" oninput="onStaffCodeInput()" autocomplete="off" style="text-align:center; font-family:monospace; letter-spacing:2px;">
- </div>
- <button class="btn btn-success" onclick="recordStaffByCode()">تسجيل</button>
- </div>
- <p style="color:rgba(48,56,65,0.45); font-size:12px; margin-top:8px;">أول إدخال = حضور، والإدخال التاني لنفس اليوم = انصراف.</p>
- </div>
-
- <div class="card">
- <div class="card-title">قائمة الموظفين — حضور اليوم</div>
- <input type="text" class="table-filter" placeholder="🔍 بحث عن موظف (اسم / كود)..." oninput="filterTableRows(this, 'staff-attendance-table')">
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>الكود (ID)</th>
- <th>الاسم</th>
- <th>الوظيفة</th>
- <th>الفرع</th>
- <th>الحضور</th>
- <th>الانصراف</th>
- <th>بواسطة</th>
- <th>إجراءات</th>
- </tr>
- </thead>
- <tbody id="staff-attendance-table">
- <tr><td colspan="8" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا يوجد موظفون — أضفهم من قسمي الموظفين والمدربين</td></tr>
- </tbody>
- </table>
- </div>
- </div>
-
- <div class="card">
- <div class="card-title">تقرير حضور الموظفين</div>
- <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
- <div class="form-group" style="margin-bottom:0;">
- <label>التاريخ</label>
- <input type="date" id="staff-report-date">
- </div>
- <button class="btn btn-primary" onclick="printStaffAttendance()">طباعة PDF (كل فرع في صفحة)</button>
- <button class="btn btn-primary" onclick="printStaffCardsSheet()" title="يجمع كل كروت الموظفين على ورقات A4 بمقاسها الصحيح مع خطوط قص — جاهزة للمطبعة">🖨️ طباعة كل كروت الموظفين (A4)</button>
- </div>
- </div>
- </div>
-
- <!-- ==================== COACHES ==================== -->
- <div class="section" id="section-coaches">
- <div class="page-title">
- <h2>إدارة المدربين</h2>
- <p>المدربون ورواتبهم (شهري أو بالنسبة) والسلف والصرف</p>
- </div>
-
- <div class="card">
- <div class="card-title">إضافة مدرب</div>
- <div class="form-grid">
- <div class="form-group">
- <label>اسم المدرب *</label>
- <input type="text" id="coach-name" placeholder="الاسم الكامل">
- </div>
- <div class="form-group">
- <label>رقم الهاتف</label>
- <input type="tel" id="coach-phone" placeholder="01XXXXXXXXX">
- </div>
- <div class="form-group">
- <label>التخصص</label>
- <select id="coach-specialty"></select>
- </div>
- <div class="form-group">
- <label>الفرع *</label>
- <select id="coach-branch">
- <option value="" disabled selected>اختر الفرع</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- <div class="form-group">
- <label>نوع التعاقد *</label>
- <select id="coach-pay-type" onchange="toggleCoachPayType()">
- <option value="monthly">راتب شهري ثابت</option>
- <option value="percentage">نسبة (عمولة)</option>
- </select>
- </div>
- <div class="form-group" id="coach-salary-group">
- <label>الراتب الشهري (ج.م)</label>
- <input type="number" id="coach-salary" placeholder="المبلغ">
- </div>
- <div class="form-group" id="coach-rate-group" style="display:none;">
- <label>النسبة (%)</label>
- <input type="number" id="coach-rate" placeholder="مثال: 20">
- </div>
- <div class="form-group">
- <label>جروبات المدرب * (جروب واحد على الأقل)</label>
- <div style="display:flex; gap:8px;">
- <input type="text" id="coach-groups" placeholder="اسم الجروب — مثال: جروب أ" style="flex:1;">
- <button type="button" class="btn btn-outline btn-sm" onclick="addCoachGroup()">➕ أضف جروب</button>
- </div>
- <div id="coach-groups-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
- </div>
- </div>
- <button class="btn btn-primary" style="margin-top: 20px;" onclick="addCoach()">إضافة المدرب</button>
- </div>
-
- <div class="card">
- <div class="card-title">قائمة المدربين والرواتب</div>
- <input type="text" class="table-filter" placeholder="🔍 بحث عن مدرب (اسم / تخصص / فرع)..." oninput="filterTableRows(this, 'coaches-table')">
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>الاسم</th>
- <th>التخصص</th>
- <th>الفرع</th>
- <th>نوع التعاقد</th>
- <th>مصروف هذا الشهر</th>
- <th>عدد الجروبات</th>
- <th>بواسطة</th>
- <th>إجراءات</th>
- </tr>
- </thead>
- <tbody id="coaches-table">
- <tr>
- <td colspan="8" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا يوجد مدربون مسجلون</td>
- </tr>
- </tbody>
- </table>
- </div>
-
- <!-- Coach comparison: who brings in more money / more players -->
- <div class="card" style="margin-top: 20px;">
- <div class="card-title">مقارنة المدربين — الأعلى تحصيلاً وعدداً للاعبين</div>
- <p style="color: rgba(48,56,65,0.5); font-size: 13px; margin-bottom: 14px;">عدد اللاعبين المضافين داخل جروبات المدرب نفسه، وإجمالي المحصّل من مدفوعات هؤلاء اللاعبين تحديداً.</p>
- <div id="coach-compare"></div>
- </div>
- </div>
- </div>
-
- <!-- ==================== FINANCIAL ==================== -->
- <div class="section" id="section-financial">
- <div class="page-title">
- <h2>تجديد الاشتراكات</h2>
- <p>إدارة الاشتراكات والتجديدات والمدفوعات</p>
- </div>
-
- <!-- Financial Summary -->
- <div class="financial-summary">
- <div class="fin-card">
- <div class="fin-amount" style="color: var(--success);" id="fin-income">0 ج.م</div>
- <div class="fin-label">إجمالي الإيرادات</div>
- </div>
- <div class="fin-card">
- <div class="fin-amount" style="color: var(--danger);" id="fin-expenses">0 ج.م</div>
- <div class="fin-label">إجمالي المصروفات</div>
- </div>
- <div class="fin-card">
- <div class="fin-amount" style="color: var(--warning);" id="fin-profit">0 ج.م</div>
- <div class="fin-label">صافي الربح</div>
- </div>
- </div>
-
- <!-- Renewal Form -->
- <div class="card">
- <div class="card-title">تجديد اشتراك</div>
- <div class="form-grid">
- <div class="form-group">
- <label>كود اللاعب</label>
- <input type="text" id="renew-code" placeholder="أدخل الكود"
- oninput="searchTraineeForRenewal()">
- </div>
- <div class="form-group">
- <label>اسم اللاعب</label>
- <input type="text" id="renew-name" placeholder="سيظهر تلقائياً" readonly>
- </div>
- <div class="form-group">
- <label id="renew-duration-label">مدة التجديد (بالأيام)</label>
- <input type="number" id="renew-duration" placeholder="مثال: 30" value="30">
- </div>
- <div class="form-group">
- <label>المبلغ المدفوع</label>
- <input type="number" id="renew-amount" placeholder="المبلغ بالجنيه">
- </div>
- <div class="form-group">
- <label>طريقة الدفع</label>
- <select id="renew-method">
- <option>نقداً</option>
- <option>تحويل بنكي</option>
- <option>فودافون كاش</option>
- <option>انستا باي</option>
- </select>
- </div>
- <div class="form-group">
- <label>تاريخ التجديد</label>
- <input type="date" id="renew-date">
- </div>
- <div class="form-group">
- <label>الفرع *</label>
- <select id="renew-branch">
- <option value="" disabled selected>اختر الفرع</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- </div>
- <button class="btn btn-primary" style="margin-top: 20px;" onclick="renewSubscription()">تأكيد التجديد
- </button>
- </div>
-
- <!-- Payments Table -->
- <div class="card">
- <div class="card-title">سجل المدفوعات</div>
- <input type="text" class="table-filter" placeholder="🔍 بحث في المدفوعات (اسم / نوع / فرع)..." oninput="filterTableRows(this, 'payments-table')">
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>الكود</th>
- <th>الاسم</th>
- <th>نوع العملية</th>
- <th>الخطة</th>
- <th>الفرع</th>
- <th>المبلغ</th>
- <th>طريقة الدفع</th>
- <th>التاريخ</th>
- <th>الحالة</th>
- <th>بواسطة</th>
- <th>إجراءات</th>
- </tr>
- </thead>
- <tbody id="payments-table">
- <tr>
- <td colspan="11" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد مدفوعات مسجلة
- </td>
- </tr>
- </tbody>
- </table>
- </div>
- </div>
-
- <!-- Pending refund requests -->
- <div class="card">
- <div class="card-title">طلبات الاسترداد المعلّقة</div>
- <p style="color: rgba(48,56,65,0.5); font-size: 13px; margin-bottom: 14px;">طلبات إلغاء الاشتراك بانتظار قرار المدير. عند الموافقة يُخصم المبلغ كمصروف ويُلغى الاشتراك.</p>
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>الكود</th>
- <th>الاسم</th>
- <th>اللعبة</th>
- <th>المسؤول</th>
- <th>النسبة</th>
- <th>سبب الإلغاء</th>
- <th>المبلغ</th>
- <th>القرار</th>
- </tr>
- </thead>
- <tbody id="refunds-list">
- <tr>
- <td colspan="8" style="text-align:center; color: rgba(48,56,65,0.3); padding: 20px;">لا توجد طلبات استرداد معلّقة</td>
- </tr>
- </tbody>
- </table>
- </div>
- </div>
- </div>
-
- <!-- ==================== SALARIES ==================== -->
- <div class="section" id="section-salaries">
- <div class="page-title">
- <h2>إدارة المرتبات والإيجار</h2>
- <p>متابعة المصروفات التشغيلية</p>
- </div>
-
- <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
- <!-- Add Employee -->
- <div class="card" id="card-add-employee">
- <div class="card-title">إضافة موظف</div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>اسم الموظف</label>
- <input type="text" id="emp-name" placeholder="الاسم الكامل">
- </div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>الوظيفة</label>
- <select id="emp-role" onchange="toggleEmpRoleOther()">
- <option>موظف استقبال</option>
- <option>مشرف</option>
- <option>عامل نظافة</option>
- <option>أخرى</option>
- </select>
- <input type="text" id="emp-role-other" placeholder="اكتب الوظيفة — مثال: أمين مخزن" style="display:none; margin-top:8px;">
- <p style="font-size:11px; color:rgba(48,56,65,0.45); margin-top:6px;">المدربون يُضافون من قسم "المدربون" المخصص.</p>
- </div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>الراتب الشهري (ج.م)</label>
- <input type="number" id="emp-salary" placeholder="المبلغ">
- </div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>الفرع *</label>
- <select id="emp-branch">
- <option value="" disabled selected>اختر الفرع</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- <button class="btn btn-primary" style="width: 100%;" onclick="addEmployee()">إضافة الموظف
- </button>
- </div>
-
- <!-- Add Expense -->
- <div class="card">
- <div class="card-title">إضافة مصروف / إيجار</div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>نوع المصروف</label>
- <select id="expense-type">
- <option>إيجار شهري</option>
- <option>فواتير كهرباء</option>
- <option>فواتير مياه</option>
- <option>صيانة</option>
- <option>تجهيزات</option>
- <option>أخرى</option>
- </select>
- </div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>الوصف</label>
- <input type="text" id="expense-desc" placeholder="وصف المصروف">
- </div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>المبلغ (ج.م)</label>
- <input type="number" id="expense-amount" placeholder="المبلغ">
- </div>
- <div class="form-group" style="margin-bottom: 15px;">
- <label>الفرع *</label>
- <select id="expense-branch">
- <option value="" disabled selected>اختر الفرع</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- <button class="btn btn-warning" style="width: 100%;" onclick="addExpense()">إضافة المصروف
- </button>
- </div>
- </div>
-
- <!-- Employees Table -->
- <div class="card" id="card-employees-table">
- <div class="card-title">قائمة الموظفين والمرتبات</div>
- <input type="text" class="table-filter" placeholder="🔍 بحث عن موظف (اسم / وظيفة / فرع)..." oninput="filterTableRows(this, 'employees-table')">
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>#</th>
- <th>الاسم</th>
- <th>الوظيفة</th>
- <th>الفرع</th>
- <th>الراتب</th>
- <th>الحالة</th>
- <th>بواسطة</th>
- <th>إجراءات</th>
- </tr>
- </thead>
- <tbody id="employees-table">
- <tr>
- <td colspan="8" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا يوجد موظفون مسجلون
- </td>
- </tr>
- </tbody>
- </table>
- </div>
- </div>
-
- <!-- Expenses Table -->
- <div class="card" id="card-expenses-table">
- <div class="card-title">سجل المصروفات والإيجار</div>
- <input type="text" class="table-filter" placeholder="🔍 بحث في المصروفات (نوع / وصف / فرع)..." oninput="filterTableRows(this, 'expenses-table')">
- <div class="table-container">
- <table>
- <thead>
- <tr>
- <th>#</th>
- <th>النوع</th>
- <th>الوصف</th>
- <th>الفرع</th>
- <th>المبلغ</th>
- <th>التاريخ</th>
- <th>بواسطة</th>
- <th>إجراءات</th>
- </tr>
- </thead>
- <tbody id="expenses-table">
- <tr>
- <td colspan="8" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد مصروفات مسجلة
- </td>
- </tr>
- </tbody>
- </table>
- </div>
- </div>
- </div>
-
- <!-- ==================== FINANCIAL DASHBOARD ==================== -->
-  <div class="section" id="section-financial-dashboard">
-  <div class="page-title">
-  <h2>الداشبورد المالي</h2>
-  <p>تحليل مالي شامل ومفصل لكل فرع — كل معاملة، كل جنيه</p>
-  </div>
-
-  <!-- Filters Bar -->
-  <div class="fd-filters-bar">
-  <div class="fd-filter-group">
-  <label for="fd-branch-filter">الفرع</label>
-  <select id="fd-branch-filter" onchange="renderFinancialDashboard()">
-  <option value="الكل">كل الفروع</option>
-  <option value="فرع المريوطيه">فرع المريوطيه</option>
-  <option value="فرع الحدايق">فرع الحدايق</option>
-  <option value="فرع الهرم">فرع الهرم</option>
-  </select>
-  </div>
-  <div class="fd-filter-group">
-  <label for="fd-date-from">من تاريخ</label>
-  <input type="date" id="fd-date-from" onchange="renderFinancialDashboard()">
-  </div>
-  <div class="fd-filter-group">
-  <label for="fd-date-to">إلى تاريخ</label>
-  <input type="date" id="fd-date-to" onchange="renderFinancialDashboard()">
-  </div>
-  <button class="btn btn-outline btn-sm" onclick="resetFDFilters()" style="align-self: flex-end;">إعادة تعيين</button>
-  <button class="btn btn-primary btn-sm" onclick="exportFinancialDashboardReport()" style="align-self: flex-end;">طباعة التقرير المالي</button>
-  </div>
-
-  <!-- KPI Cards -->
-  <div class="fd-kpi-grid">
-  <div class="fd-kpi-card fd-kpi-income">
-  <div class="fd-kpi-icon" style="font-weight: bold;">اجمالي الايردات</div>
-  <div class="fd-kpi-value" id="fd-total-income" style="color: #28a745;">0 ج.م</div>
-  <div class="fd-kpi-label"></div>
-  <div class="fd-kpi-detail" id="fd-income-count">0 عملية</div>
-  </div>
-  <div class="fd-kpi-card fd-kpi-expense">
-  <div class="fd-kpi-icon" style="font-weight: bold;">اجمالي المصروفات</div>
-  <div class="fd-kpi-value" id="fd-total-expenses" style="color: #dc3545;">0 ج.م</div>
-  <div class="fd-kpi-label"></div>
-  <div class="fd-kpi-detail" id="fd-expense-count">0 عملية</div>
-  </div>
-  <div class="fd-kpi-card fd-kpi-salary">
-  <div class="fd-kpi-icon" style="font-weight: bold;">اجمالي المرتبات</div>
-  <div class="fd-kpi-value" id="fd-total-salaries" style="color: #ffc107;">0 ج.م</div>
-  <div class="fd-kpi-label"></div>
-  <div class="fd-kpi-detail" id="fd-salary-count">0 موظف</div>
-  </div>
-  <div class="fd-kpi-card fd-kpi-profit">
-  <div class="fd-kpi-icon" style="font-weight: bold;">صافي الربح</div>
-  <div class="fd-kpi-value" id="fd-net-profit" style="color: #28a745;">0 ج.م</div>
-  <div class="fd-kpi-label"></div>
-  <div class="fd-kpi-detail" id="fd-profit-margin">هامش الربح: 0%</div>
-  </div>
-  <div class="fd-kpi-card fd-kpi-new-subs">
-  <div class="fd-kpi-icon" style="font-weight: bold;">إيرادات الاشتراكات الجديدة</div>
-  <div class="fd-kpi-value" id="fd-new-subs" style="color: #28a745;">0 ج.م</div>
-  <div class="fd-kpi-label"></div>
-  <div class="fd-kpi-detail" id="fd-new-subs-count">0 اشتراك</div>
-  </div>
-  <div class="fd-kpi-card fd-kpi-renewals">
-  <div class="fd-kpi-icon" style="font-weight: bold;">إيرادات التجديدات</div>
-  <div class="fd-kpi-value" id="fd-renewals" style="color: #28a745;">0 ج.م</div>
-  <div class="fd-kpi-label"></div>
-  <div class="fd-kpi-detail" id="fd-renewals-count">0 تجديد</div>
-  </div>
-  </div>
-
-  <!-- Monthly targets per branch (forecast from existing data) -->
-  <div class="card">
-  <div class="card-title">🎯 توقّع التارجت الشهري لكل فرع</div>
-  <p style="color: rgba(48,56,65,0.5); font-size: 13px; margin-bottom: 14px;">المستهدف محسوب من متوسط آخر 3 شهور للفرع مع اتجاه النمو، والمحقّق هو إيراد الشهر الحالي حتى الآن.</p>
-  <div id="fd-targets-content"></div>
-  </div>
-
-  <!-- Branch Comparison (only visible when "All" selected) -->
-  <div class="card" id="fd-branch-comparison-card" style="display:none;">
-  <div class="card-title">📊 مقارنة أداء الفروع</div>
-  <div id="fd-branch-comparison-content"></div>
-  </div>
-
-  <!-- Income Breakdown -->
-  <div class="card">
-  <div class="card-title" style="justify-content: space-between;">
-  <span>💵 تفاصيل الإيرادات</span>
-  <span class="badge badge-success" id="fd-income-badge">0 ج.م</span>
-  </div>
-  <!-- Income by Type -->
-  <div class="fd-breakdown-grid" id="fd-income-breakdown"></div>
-  <!-- Income by Payment Method -->
-  <h4 style="font-size: 14px; font-weight: 700; color: var(--accent); margin: 20px 0 12px; padding-top: 15px; border-top: 1px solid rgba(48,56,65,0.08);">توزيع الإيرادات حسب طريقة الدفع</h4>
-  <div class="fd-breakdown-grid" id="fd-income-by-method"></div>
-  <!-- Full Income Table -->
-  <h4 style="font-size: 14px; font-weight: 700; color: var(--accent); margin: 20px 0 12px; padding-top: 15px; border-top: 1px solid rgba(48,56,65,0.08);">سجل الإيرادات التفصيلي (كل عملية)</h4>
-  <div class="table-container">
-  <table>
-  <thead>
-  <tr>
-  <th>#</th>
-  <th>الكود</th>
-  <th>الاسم</th>
-  <th>النوع</th>
-  <th>الرياضة</th>
-  <th>الفرع</th>
-  <th>المبلغ</th>
-  <th>طريقة الدفع</th>
-  <th>التاريخ</th>
-  <th>بواسطة</th>
-  </tr>
-  </thead>
-  <tbody id="fd-income-table"></tbody>
-  </table>
-  </div>
-  </div>
-
-  <!-- Expenses Breakdown -->
-  <div class="card">
-  <div class="card-title" style="justify-content: space-between;">
-  <span>📤 تفاصيل المصروفات</span>
-  <span class="badge badge-danger" id="fd-expense-badge">0 ج.م</span>
-  </div>
-  <!-- Expense by Type -->
-  <div class="fd-breakdown-grid" id="fd-expense-breakdown"></div>
-  <!-- Full Expenses Table -->
-  <h4 style="font-size: 14px; font-weight: 700; color: var(--accent); margin: 20px 0 12px; padding-top: 15px; border-top: 1px solid rgba(48,56,65,0.08);">سجل المصروفات التفصيلي (كل عملية)</h4>
-  <div class="table-container">
-  <table>
-  <thead>
-  <tr>
-  <th>#</th>
-  <th>الكود</th>
-  <th>النوع</th>
-  <th>الوصف</th>
-  <th>الفرع</th>
-  <th>المبلغ</th>
-  <th>التاريخ</th>
-  <th>بواسطة</th>
-  </tr>
-  </thead>
-  <tbody id="fd-expense-table"></tbody>
-  </table>
-  </div>
-  </div>
-
-  <!-- Salary Breakdown -->
-  <div class="card">
-  <div class="card-title" style="justify-content: space-between;">
-  <span>👥 تفاصيل المرتبات المصروفة</span>
-  <span class="badge badge-warning" id="fd-salary-badge">0 ج.م</span>
-  </div>
-  <div class="table-container">
-  <table>
-  <thead>
-  <tr>
-  <th>#</th>
-  <th>الكود</th>
-  <th>الوصف</th>
-  <th>الفرع</th>
-  <th>المبلغ</th>
-  <th>التاريخ</th>
-  <th>بواسطة</th>
-  </tr>
-  </thead>
-  <tbody id="fd-salary-table"></tbody>
-  </table>
-  </div>
-  </div>
-
-  <!-- All Transactions Combined -->
-  <div class="card">
-  <div class="card-title">📋 كشف حساب شامل (كل الحركات المالية مرتبة بالتاريخ)</div>
-  <div class="table-container">
-  <table>
-  <thead>
-  <tr>
-  <th>#</th>
-  <th>النوع</th>
-  <th>البيان</th>
-  <th>الفرع</th>
-  <th>وارد</th>
-  <th>منصرف</th>
-  <th>التاريخ</th>
-  <th>بواسطة</th>
-  </tr>
-  </thead>
-  <tbody id="fd-all-transactions-table"></tbody>
-  </table>
-  </div>
-  </div>
-
-  </div>
-
- <!-- ==================== REPORTS ==================== -->
- <div class="section" id="section-reports">
- <div class="page-title">
- <h2>التقارير والإحصائيات</h2>
- <p>تقارير شاملة لجميع الأقسام</p>
- </div>
-
- <!-- (3) Date-range loader: pull only the chosen period instead of all
+        <select
+          id="device-branch-select"
+          style="padding: 8px 35px"
+          class="btn btn-outline btn-sm"
+          onchange="onDeviceBranchChange(this.value)"
+          title="الفرع الذي يعمل عليه هذا الجهاز"
+        >
+          <option value="">كل الفروع</option>
+          <option value="فرع المريوطيه">فرع المريوطيه</option>
+          <option value="فرع الحدايق">فرع الحدايق</option>
+          <option value="فرع الهرم">فرع الهرم</option>
+        </select>
+        <div class="date-display" id="current-user">Admin</div>
+        <button class="btn btn-outline btn-sm" id="logout-btn" onclick="logout()">تسجيل الخروج</button>
+      </div>
+    </header>
+
+    <div class="app-container" id="app-container" style="display: none">
+      <!-- Backdrop behind the mobile off-canvas sidebar -->
+      <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
+      <!-- SIDEBAR -->
+      <nav class="sidebar" id="sidebar">
+        <div class="sidebar-title">القائمة الرئيسية</div>
+
+        <div class="nav-item active" data-section="dashboard" onclick="showSection('dashboard')">
+          <span class="nav-text">لوحة التحكم</span>
+        </div>
+
+        <div class="nav-item" data-section="registration" onclick="showSection('registration')">
+          <span class="nav-text">اللاعبين</span>
+        </div>
+
+        <div class="nav-item" data-section="trials" onclick="showSection('trials')">
+          <span class="nav-text">الاختبارات</span>
+        </div>
+
+        <div class="nav-item" data-section="attendance" onclick="showSection('attendance')">
+          <span class="nav-text">الحضور</span>
+        </div>
+
+        <div class="nav-item" data-section="sessions" onclick="showSection('sessions')">
+          <span class="nav-text">SESSIONS</span>
+        </div>
+
+        <div class="nav-item" data-section="groups" onclick="showSection('groups')">
+          <span class="nav-text">المجموعات</span>
+        </div>
+
+        <div class="nav-item" data-section="coaches" onclick="showSection('coaches')">
+          <span class="nav-text">المدربين</span>
+        </div>
+
+        <div class="nav-item" data-section="staff-attendance" onclick="showSection('staff-attendance')">
+          <span class="nav-text">حضور الموظفين</span>
+        </div>
+
+        <div class="nav-item" data-section="financial" onclick="showSection('financial')">
+          <span class="nav-text">تجديد الاشتراكات</span
+          ><span id="refunds-nav-badge" class="nav-count-badge" style="display: none" title="طلبات استرداد معلّقة"
+            >0</span
+          >
+        </div>
+
+        <div class="nav-item" data-section="extra-income" onclick="showSection('extra-income')">
+          <span class="nav-text">إيرادات إضافية</span>
+        </div>
+
+        <div class="nav-item" data-section="salaries" onclick="showSection('salaries')">
+          <span class="nav-text">الشؤون المالية</span>
+        </div>
+
+        <div class="nav-item" data-section="financial-dashboard" onclick="showSection('financial-dashboard')">
+          <span class="nav-text">لوحة التحكم المالية</span>
+        </div>
+
+        <div class="nav-item" data-section="reports" onclick="showSection('reports')">
+          <span class="nav-text">التقارير</span>
+        </div>
+      </nav>
+
+      <!-- MAIN CONTENT -->
+      <main class="main-content">
+        <!-- ==================== DASHBOARD ==================== -->
+        <div class="section active" id="section-dashboard">
+          <div class="page-title">
+            <h2>لوحة التحكم الرئيسية</h2>
+            <p>نظرة عامة على جميع الأقسام</p>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-card blue">
+              <div class="stat-value" id="dash-total">0</div>
+              <div class="stat-label" style="color: black">إجمالي اللاعبين</div>
+            </div>
+            <div class="stat-card green">
+              <div class="stat-value" id="dash-active">0</div>
+              <div class="stat-label">اشتراكات نشطة</div>
+            </div>
+            <div class="stat-card yellow">
+              <div class="stat-value" id="dash-subs">0</div>
+              <div class="stat-label">إجمالي الاشتراكات</div>
+            </div>
+            <div class="stat-card red">
+              <div class="stat-value" id="dash-revenue">0</div>
+              <div class="stat-label" id="dash-revenue-label">الإيرادات حسب الفترة المختارة (ج.م)</div>
+            </div>
+          </div>
+
+          <!-- Expiry Alerts -->
+          <div class="card" id="alerts-card" style="display: none">
+            <div class="card-title" style="color: var(--warning)">تنبيهات اشتراكات قريبة من الانتهاء</div>
+            <div id="expiry-alerts" style="display: flex; flex-direction: column; gap: 10px"></div>
+          </div>
+
+          <!-- Absence Alerts -->
+          <div class="card" id="absentees-card" style="display: none">
+            <div class="card-title" style="color: var(--danger)">تنبيهات: لاعبون منقطعون عن الحضور</div>
+            <div id="absentees-list" style="display: flex; flex-direction: column; gap: 10px"></div>
+          </div>
+
+          <!-- Quick Actions -->
+          <div class="card">
+            <div class="card-title">إجراءات سريعة</div>
+            <div style="display: flex; gap: 15px; flex-wrap: wrap">
+              <button class="btn btn-primary" onclick="showSection('registration')">تسجيل لاعب جديد</button>
+              <button class="btn btn-success" onclick="showSection('attendance')">تسجيل الحضور</button>
+              <button class="btn btn-warning" onclick="showSection('financial')">تجديد اشتراك</button>
+              <button class="btn btn-outline" onclick="showSection('reports')">عرض التقارير</button>
+            </div>
+          </div>
+
+          <!-- Recent Registrations -->
+          <div class="card">
+            <div class="card-title">آخر التسجيلات</div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الكود</th>
+                    <th>الاسم</th>
+                    <th>النوع</th>
+                    <th>الحالة</th>
+                    <th>باقي على الانتهاء</th>
+                  </tr>
+                </thead>
+                <tbody id="recent-registrations">
+                  <tr>
+                    <td colspan="5" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                      لا توجد تسجيلات بعد
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- ==================== BRANCH PROFITS & CASH FLOW ==================== -->
+          <div class="card" id="branch-profits-card" style="margin-top: 20px">
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 15px;
+                margin-bottom: 20px;
+                border-bottom: 1px solid rgba(48, 56, 65, 0.1);
+                padding-bottom: 15px;
+              "
+            >
+              <div>
+                <h3 style="font-size: 18px; font-weight: 700; color: var(--accent)">تفاصيل الأرباح والخزينة بالفروع</h3>
+                <p style="color: rgba(48, 56, 65, 0.5); font-size: 12px; margin-top: 3px">
+                  متابعة الإيرادات والمصروفات وصافي الربح لكل فرع
+                </p>
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
+                <button id="dash-period-this" class="btn btn-sm btn-outline" onclick="setDashPeriod('this')">
+                  الشهر الحالي
+                </button>
+                <button id="dash-period-last" class="btn btn-sm btn-outline" onclick="setDashPeriod('last')">
+                  الشهر الماضي
+                </button>
+                <button id="dash-period-all" class="btn btn-sm btn-primary" onclick="setDashPeriod('all')">
+                  كل الفترة
+                </button>
+              </div>
+              <!-- Pick a specific calendar month for the revenue card (overrides the
+ buttons above). Clearing it goes back to the selected period button. -->
+              <div class="form-group" style="margin-bottom: 0">
+                <input
+                  type="month"
+                  id="dash-month"
+                  onchange="onDashMonthChange()"
+                  title="اختر شهراً محدداً"
+                  style="padding: 7px 10px; border-radius: 8px; border: 1px solid var(--gold); font-weight: 600"
+                />
+              </div>
+              <!-- Which revenue the red card shows: all, or one type only. -->
+              <div class="form-group" style="margin-bottom: 0; min-width: 160px">
+                <select
+                  id="dash-revenue-cat"
+                  onchange="filterBranchDashboard()"
+                  style="
+                    padding: 8px 12px;
+                    border-radius: 8px;
+                    border: 1px solid var(--gold);
+                    font-weight: 600;
+                    width: 100%;
+                  "
+                >
+                  <option value="">كل الإيرادات</option>
+                  <option value="subscription">اشتراكات</option>
+                  <option value="tournament">بطولات</option>
+                  <option value="medical">كشوفات طبية</option>
+                  <option value="sales">مبيعات (أدوات)</option>
+                  <option value="other">أخرى (قيد/كارنيه/اختبارات/إيجار)</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom: 0; min-width: 200px">
+                <select
+                  id="dashboard-branch-filter"
+                  onchange="filterBranchDashboard()"
+                  style="
+                    padding: 8px 35px;
+                    border-radius: 8px;
+                    border: 1px solid var(--gold);
+                    font-weight: 600;
+                    width: 100%;
+                  "
+                >
+                  <option value="الكل">كل الفروع (الكل)</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+            </div>
+
+            <div
+              class="financial-summary"
+              style="
+                margin-bottom: 25px;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                display: grid;
+                gap: 20px;
+              "
+            >
+              <div
+                class="fin-card"
+                style="
+                  background: rgba(63, 143, 111, 0.05);
+                  border: 1px solid rgba(63, 143, 111, 0.15);
+                  border-radius: 12px;
+                  padding: 20px;
+                  text-align: center;
+                "
+              >
+                <div
+                  class="fin-amount"
+                  style="color: var(--success); font-size: 24px; font-weight: 800"
+                  id="branch-fin-income"
+                >
+                  0 ج.م
+                </div>
+                <div class="fin-label" style="font-size: 13px; color: rgba(48, 56, 65, 0.6); margin-top: 5px">
+                  إجمالي الإيرادات
+                </div>
+              </div>
+              <div
+                class="fin-card"
+                style="
+                  background: rgba(181, 69, 60, 0.05);
+                  border: 1px solid rgba(181, 69, 60, 0.15);
+                  border-radius: 12px;
+                  padding: 20px;
+                  text-align: center;
+                "
+              >
+                <div
+                  class="fin-amount"
+                  style="color: var(--danger); font-size: 24px; font-weight: 800"
+                  id="branch-fin-expenses"
+                >
+                  0 ج.م
+                </div>
+                <div class="fin-label" style="font-size: 13px; color: rgba(48, 56, 65, 0.6); margin-top: 5px">
+                  إجمالي المصروفات
+                </div>
+              </div>
+              <div
+                class="fin-card"
+                style="
+                  background: rgba(192, 138, 46, 0.05);
+                  border: 1px solid rgba(192, 138, 46, 0.15);
+                  border-radius: 12px;
+                  padding: 20px;
+                  text-align: center;
+                "
+              >
+                <div
+                  class="fin-amount"
+                  style="color: var(--warning); font-size: 24px; font-weight: 800"
+                  id="branch-fin-profit"
+                >
+                  0 ج.م
+                </div>
+                <div class="fin-label" style="font-size: 13px; color: rgba(48, 56, 65, 0.6); margin-top: 5px">
+                  صافي الربح
+                </div>
+              </div>
+            </div>
+
+            <!-- Revenue split by type (follows the selected branch + period above) -->
+            <div style="margin-bottom: 25px">
+              <h4 style="font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--accent)">
+                تفصيل الإيرادات حسب النوع
+              </h4>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px">
+                <div
+                  class="fin-card"
+                  style="
+                    background: rgba(63, 143, 111, 0.05);
+                    border: 1px solid rgba(63, 143, 111, 0.15);
+                    border-radius: 12px;
+                    padding: 16px;
+                    text-align: center;
+                  "
+                >
+                  <div style="color: var(--success); font-size: 20px; font-weight: 800" id="rev-subscription">
+                    0 ج.م
+                  </div>
+                  <div style="font-size: 12px; color: rgba(48, 56, 65, 0.6); margin-top: 4px">اشتراكات</div>
+                </div>
+                <div
+                  class="fin-card"
+                  style="
+                    background: rgba(192, 138, 46, 0.05);
+                    border: 1px solid rgba(192, 138, 46, 0.15);
+                    border-radius: 12px;
+                    padding: 16px;
+                    text-align: center;
+                  "
+                >
+                  <div style="color: var(--warning); font-size: 20px; font-weight: 800" id="rev-tournament">0 ج.م</div>
+                  <div style="font-size: 12px; color: rgba(48, 56, 65, 0.6); margin-top: 4px">بطولات</div>
+                </div>
+                <div
+                  class="fin-card"
+                  style="
+                    background: rgba(60, 110, 181, 0.05);
+                    border: 1px solid rgba(60, 110, 181, 0.15);
+                    border-radius: 12px;
+                    padding: 16px;
+                    text-align: center;
+                  "
+                >
+                  <div style="color: #3c6eb5; font-size: 20px; font-weight: 800" id="rev-medical">0 ج.م</div>
+                  <div style="font-size: 12px; color: rgba(48, 56, 65, 0.6); margin-top: 4px">كشوفات طبية</div>
+                </div>
+                <div
+                  class="fin-card"
+                  style="
+                    background: rgba(139, 92, 178, 0.05);
+                    border: 1px solid rgba(139, 92, 178, 0.15);
+                    border-radius: 12px;
+                    padding: 16px;
+                    text-align: center;
+                  "
+                >
+                  <div style="color: #8b5cb2; font-size: 20px; font-weight: 800" id="rev-sales">0 ج.م</div>
+                  <div style="font-size: 12px; color: rgba(48, 56, 65, 0.6); margin-top: 4px">مبيعات (أدوات)</div>
+                </div>
+                <div
+                  class="fin-card"
+                  style="
+                    background: rgba(48, 56, 65, 0.04);
+                    border: 1px solid rgba(48, 56, 65, 0.12);
+                    border-radius: 12px;
+                    padding: 16px;
+                    text-align: center;
+                  "
+                >
+                  <div style="color: var(--accent); font-size: 20px; font-weight: 800" id="rev-other">0 ج.م</div>
+                  <div style="font-size: 12px; color: rgba(48, 56, 65, 0.6); margin-top: 4px">
+                    أخرى (قيد/كارنيه/اختبارات/إيجار)
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 style="font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--accent)">
+                حركة المعاملات المالية (إيرادات ومصروفات)
+              </h4>
+              <div class="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>النوع</th>
+                      <th>البيان</th>
+                      <th>الفرع</th>
+                      <th>المبلغ</th>
+                      <th>التاريخ</th>
+                      <th>بواسطة</th>
+                    </tr>
+                  </thead>
+                  <tbody id="branch-transactions-table">
+                    <tr>
+                      <td colspan="6" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 20px">
+                        لا توجد معاملات مالية مسجلة
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== REGISTRATION ==================== -->
+        <div class="section" id="section-registration">
+          <div class="page-title">
+            <h2>قسم التسجيل</h2>
+            <p>تسجيل لاعبين جدد باشتراك</p>
+          </div>
+
+          <!-- Registration Form -->
+          <div class="card">
+            <div class="card-title">بيانات اللاعب</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>الاسم الكامل *</label>
+                <input type="text" id="reg-name" placeholder="أدخل الاسم الكامل" />
+              </div>
+              <div class="form-group">
+                <label>رقم الهاتف *</label>
+                <input type="tel" id="reg-phone" placeholder="01XXXXXXXXX" />
+              </div>
+              <div class="form-group">
+                <label>السن</label>
+                <input type="number" id="reg-age" placeholder="العمر بالسنوات" />
+              </div>
+              <div class="form-group">
+                <label>الجنس</label>
+                <select id="reg-gender">
+                  <option value="ولد">ولد</option>
+                  <option value="بنت">بنت</option>
+                </select>
+              </div>
+
+              <!-- Subscription Only Fields -->
+              <div class="form-group sub-only">
+                <label>نوع الرياضة (يمكن اختيار أكثر من لعبة)</label>
+                <div style="display: flex; gap: 8px">
+                  <select id="reg-sport" onchange="toggleSportLevel()" style="flex: 1"></select>
+                  <button type="button" class="btn btn-outline btn-sm" onclick="addRegSport()">➕ أضف لعبة</button>
+                </div>
+                <div id="reg-sports-list" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px"></div>
+              </div>
+              <div class="form-group sub-only" id="reg-level-group" style="display: none"></div>
+              <div class="form-group sub-only">
+                <label>الفريق / المرحلة (يدوي)</label>
+                <input type="text" id="reg-stage" placeholder="مثال: فريق تحت 8 / تحت 7" />
+              </div>
+              <div class="form-group sub-only">
+                <label>المدرب المسؤول</label>
+                <select id="reg-trainer" onchange="populateRegGroupSelect()">
+                  <option value="غير محدد">— غير محدد —</option>
+                </select>
+              </div>
+              <div class="form-group sub-only">
+                <label>جروب الكابتن (اختياري)</label>
+                <select id="reg-group">
+                  <option value="">— بدون جروب —</option>
+                </select>
+              </div>
+              <div class="form-group sub-only">
+                <label>تاريخ بداية الاشتراك</label>
+                <input type="date" id="reg-start-date" />
+              </div>
+              <div class="form-group sub-only" id="reg-duration-group">
+                <label>مدة الاشتراك (بالأيام)</label>
+                <input type="number" id="reg-duration" placeholder="مثال: 30" value="30" />
+              </div>
+              <div class="form-group sub-only" id="reg-sessions-group">
+                <label>عدد الحصص في الشهر</label>
+                <input type="number" id="reg-sessions" placeholder="يُملأ تلقائياً حسب اللعبة — قابل للتعديل" />
+              </div>
+              <div class="form-group sub-only">
+                <label>السعر الإجمالي للاشتراك</label>
+                <input type="number" id="reg-total" placeholder="السعر الكامل (للدفع على مراحل)" />
+              </div>
+              <div class="form-group sub-only">
+                <label>المبلغ المدفوع الآن</label>
+                <input type="number" id="reg-amount" placeholder="المبلغ المدفوع" />
+              </div>
+              <div class="form-group sub-only">
+                <label>طريقة الدفع</label>
+                <select id="reg-method"></select>
+              </div>
+              <div class="form-group">
+                <label>الفرع *</label>
+                <select id="reg-branch">
+                  <option value="" disabled selected>اختر الفرع</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>كود البطاقة </label>
+                <div style="display: flex; gap: 8px">
+                  <input
+                    type="text"
+                    id="reg-card-code"
+                    placeholder="أدخل كود الكرت المطبوع أو اتركه للتوليد التلقائي"
+                    style="flex: 1"
+                  />
+                  <button type="button" class="btn btn-outline btn-sm" onclick="addRegCode()">➕ أضف كود</button>
+                </div>
+                <div id="reg-codes-list" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px"></div>
+              </div>
+              <div class="form-group">
+                <label>المصدر</label>
+                <select id="reg-source">
+                  <option value="" disabled selected>اختر المصدر</option>
+                  <option value="سوشيال ميديا">سوشيال ميديا</option>
+                  <option value="معرفة">معرفة / توصية</option>
+                  <option value="زيارة مباشرة">زيارة مباشرة</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>ملاحظات</label>
+                <input type="text" id="reg-notes" placeholder="أي ملاحظات إضافية" />
+              </div>
+
+              <!-- Optional add-on services (part of the trainee's data) -->
+              <div
+                style="
+                  grid-column: 1 / -1;
+                  border-top: 1px solid rgba(48, 56, 65, 0.1);
+                  margin-top: 6px;
+                  padding-top: 14px;
+                "
+              >
+                <div style="font-weight: 700; color: var(--accent); margin-bottom: 4px">خدمات إضافية (اختياري)</div>
+                <p style="color: rgba(48, 56, 65, 0.5); font-size: 12px; margin-bottom: 12px">
+                  فعّل الخدمة وأدخل سعرها — تُحتسب كإيراد، وتظهر ضمن بيانات اللاعب القابلة للتعديل.
+                </p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+                  <div class="addon-box">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px">
+                      <input type="checkbox" id="addon-test" style="width: 18px; height: 18px" /> اختبارات
+                    </label>
+                    <input type="number" id="addon-test-price" placeholder="السعر (يدوي)" />
+                  </div>
+                  <div class="addon-box">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px">
+                      <input type="checkbox" id="addon-belt" style="width: 18px; height: 18px" /> اختبار حزام
+                    </label>
+                    <input type="number" id="addon-belt-price" placeholder="السعر (يدوي)" />
+                  </div>
+                  <div class="addon-box">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px">
+                      <input type="checkbox" id="addon-tournament" style="width: 18px; height: 18px" /> بطولات
+                    </label>
+                    <input type="number" id="addon-tournament-price" placeholder="السعر (يدوي)" />
+                  </div>
+                  <div class="addon-box">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px">
+                      <input type="checkbox" id="addon-locker" style="width: 18px; height: 18px" /> إيجار لوكر
+                    </label>
+                    <input type="number" id="addon-locker-price" value="150" />
+                  </div>
+                  <div class="addon-box">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px">
+                      <input type="checkbox" id="addon-internet" style="width: 18px; height: 18px" /> اشتراك انترنت
+                    </label>
+                    <input type="number" id="addon-internet-price" value="100" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top: 20px; display: flex; gap: 10px">
+              <button class="btn btn-primary" onclick="registerTrainee()">تسجيل اللاعب</button>
+              <button class="btn btn-outline" onclick="clearForm()">مسح البيانات</button>
+            </div>
+
+            <!-- ID Display -->
+            <div class="id-display" id="id-result">
+              <div style="font-size: 13px; color: rgba(48, 56, 65, 0.5); margin-bottom: 10px">
+                تم التسجيل بنجاح! كود اللاعب:
+              </div>
+              <div class="id-code" id="generated-id">--</div>
+              <div style="font-size: 12px; color: rgba(48, 56, 65, 0.4); margin-top: 10px">
+                احتفظ بهذا الكود لتسجيل الحضور
+              </div>
+              <button class="btn btn-outline btn-sm" style="margin-top: 15px" onclick="printID()">
+                طباعة بطاقة العضوية
+              </button>
+            </div>
+          </div>
+
+          <!-- Trainees List -->
+          <div class="card">
+            <div class="card-title">قائمة اللاعبين المسجلين</div>
+            <div class="search-bar" style="flex-wrap: wrap">
+              <input
+                type="text"
+                id="search-trainees"
+                placeholder="ابحث باسم أو كود..."
+                oninput="filterTrainees()"
+                style="flex: 1; min-width: 180px"
+              />
+              <select
+                id="filter-sport"
+                onchange="onSportFilterChange()"
+                style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--secondary); min-width: 150px"
+              >
+                <option value="الكل">كل الرياضات</option>
+              </select>
+              <select
+                id="filter-trainer"
+                onchange="filterTrainees()"
+                style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--secondary); min-width: 150px"
+              >
+                <option value="الكل">كل المدربين</option>
+              </select>
+              <button class="btn btn-outline" onclick="resetTraineeFilters()">إلغاء الفلتر</button>
+              <button class="btn btn-outline" onclick="exportData()">تصدير</button>
+              <button
+                class="btn btn-primary"
+                onclick="printTraineeCardsSheet()"
+                title="يجمع كل كروت اللاعبين على ورقات A4 بمقاسها الصحيح مع خطوط قص — جاهزة للمطبعة"
+              >
+                🖨️ طباعة كل الكروت (A4)
+              </button>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الكود</th>
+                    <th>الاسم</th>
+                    <th>الهاتف</th>
+                    <th>النوع</th>
+                    <th>الفرع</th>
+                    <th>الرياضة</th>
+                    <th>الحالة</th>
+                    <th>باقي على الانتهاء</th>
+                    <th>بواسطة</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="trainees-table">
+                  <tr>
+                    <td colspan="10" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                      لا يوجد لاعبون مسجلون بعد
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Blank branded cards / barcodes -->
+          <div class="card">
+            <div class="card-title">طباعة كروت بأكواد جاهزة</div>
+            <p style="color: rgba(48, 56, 65, 0.5); font-size: 13px; margin-bottom: 14px">
+              كل كرت يُطبع عليه كود منظّم فريد بالشكل <b>الفرع-الرياضة-التسلسل</b> (مثال: <code>C-KA-0001</code>،
+              والجمباز <code>C-WAG-T-0001</code>) + QR. تكتب الاسم يدوياً، وعند تسجيل اللاعب تُدخل كود الكرت في خانة
+              "كود البطاقة". لا يمكن لفرع طباعة كروت فرع آخر.
+            </p>
+            <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap">
+              <div class="form-group" style="max-width: 200px; margin-bottom: 0">
+                <label>الفرع</label>
+                <select id="blank-cards-branch"></select>
+              </div>
+              <div class="form-group" style="max-width: 200px; margin-bottom: 0">
+                <label>الرياضة</label>
+                <select id="blank-cards-sport" onchange="onBlankSportChange()"></select>
+              </div>
+              <div
+                class="form-group"
+                id="blank-cards-sector-group"
+                style="max-width: 170px; margin-bottom: 0; display: none"
+              >
+                <label>القطاع (جمباز)</label>
+                <select id="blank-cards-sector"></select>
+              </div>
+              <div class="form-group" style="max-width: 140px; margin-bottom: 0">
+                <label>عدد الكروت</label>
+                <input type="number" id="blank-cards-qty" value="10" min="1" max="1000" />
+              </div>
+              <button class="btn btn-primary" onclick="printBlankCards()">طباعة الكروت</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== TRIALS (free test players) ==================== -->
+        <div class="section" id="section-trials">
+          <div class="page-title">
+            <h2>اللاعبون التجريبيون</h2>
+            <p>الحصص التجريبية المجانية — سجّل اللاعب التجريبي، ثم اقبله لتحويله لمشترك أو ارفضه</p>
+          </div>
+
+          <!-- Trial registration (free, data only) -->
+          <div class="card">
+            <div class="card-title">تسجيل لاعب تجريبي (مجاني)</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>الاسم الكامل *</label>
+                <input type="text" id="trial-name" placeholder="أدخل الاسم الكامل" />
+              </div>
+              <div class="form-group">
+                <label>رقم الهاتف *</label>
+                <input type="tel" id="trial-phone" placeholder="01XXXXXXXXX" />
+              </div>
+              <div class="form-group">
+                <label>العمر</label>
+                <input type="number" id="trial-age" placeholder="العمر بالسنوات" />
+              </div>
+              <div class="form-group">
+                <label>النوع</label>
+                <select id="trial-gender">
+                  <option value="ولد">ولد</option>
+                  <option value="بنت">بنت</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>الفرع *</label>
+                <select id="trial-branch">
+                  <option value="" disabled selected>اختر الفرع</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>اللاعب جه من طرف إيه؟</label>
+                <select id="trial-source">
+                  <option value="" disabled selected>اختر المصدر</option>
+                  <option value="سوشيال ميديا">سوشيال ميديا</option>
+                  <option value="معرفة">معرفة / توصية</option>
+                  <option value="زيارة مباشرة">زيارة مباشرة (لقاها عادي)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>ملاحظات</label>
+                <input type="text" id="trial-notes" placeholder="أي ملاحظات إضافية" />
+              </div>
+            </div>
+            <button class="btn btn-primary" style="margin-top: 16px" onclick="registerTrial()">
+              تسجيل اللاعب التجريبي
+            </button>
+          </div>
+
+          <div class="card">
+            <div class="card-title">قائمة اللاعبين التجريبيين</div>
+            <input
+              type="text"
+              class="table-filter"
+              placeholder="🔍 بحث عن لاعب تجريبي (اسم / هاتف / فرع)..."
+              oninput="filterTableRows(this, 'trials-table')"
+            />
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الكود</th>
+                    <th>الاسم</th>
+                    <th>الهاتف</th>
+                    <th>الفرع</th>
+                    <th>تاريخ التسجيل</th>
+                    <th>الحالة</th>
+                    <th>بواسطة</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="trials-table">
+                  <tr>
+                    <td colspan="8" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                      لا يوجد لاعبون تجريبيون
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== ATTENDANCE ==================== -->
+        <div class="section" id="section-attendance">
+          <div class="page-title">
+            <h2>قسم الحضور</h2>
+            <p>تسجيل ومتابعة حضور اللاعبين</p>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px">
+            <!-- Scanner -->
+            <div class="card">
+              <div class="card-title">إدخال كود الحضور</div>
+              <div class="scanner-area">
+                <p style="color: rgba(48, 56, 65, 0.5); margin-bottom: 15px">أدخل كود اللاعب لتسجيل الحضور</p>
+              </div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <input
+                  type="text"
+                  id="attendance-code"
+                  placeholder="مثال: Wasl-0427"
+                  oninput="onAttendanceInput()"
+                  autocomplete="off"
+                  style="text-align: center; font-size: 18px; font-family: monospace; letter-spacing: 2px"
+                />
+                <p style="color: rgba(48, 56, 65, 0.4); font-size: 12px; text-align: center; margin-top: 8px">
+                  يتم تسجيل الحضور تلقائياً بمجرد إدخال الكود
+                </p>
+              </div>
+              <button class="btn btn-success" style="width: 100%" onclick="recordAttendance()">
+                تسجيل الحضور يدوياً
+              </button>
+
+              <!-- Result -->
+              <div class="attendance-result" id="attendance-result"></div>
+            </div>
+
+            <!-- Today Stats -->
+            <div class="card">
+              <div class="card-title">إحصائيات اليوم</div>
+              <div style="display: flex; flex-direction: column; gap: 15px">
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 15px;
+                    background: rgba(48, 56, 65, 0.03);
+                    border-radius: 10px;
+                  "
+                >
+                  <span style="color: rgba(48, 56, 65, 0.6)">حاضرين اليوم</span>
+                  <span style="font-size: 24px; font-weight: 700; color: var(--success)" id="today-present">0</span>
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 15px;
+                    background: rgba(48, 56, 65, 0.03);
+                    border-radius: 10px;
+                  "
+                >
+                  <span style="color: rgba(48, 56, 65, 0.6)">غياب</span>
+                  <span style="font-size: 24px; font-weight: 700; color: var(--danger)" id="today-absent">0</span>
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 15px;
+                    background: rgba(48, 56, 65, 0.03);
+                    border-radius: 10px;
+                  "
+                >
+                  <span style="color: rgba(48, 56, 65, 0.6)">نسبة الحضور</span>
+                  <span style="font-size: 24px; font-weight: 700; color: var(--warning)" id="attendance-rate">0%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Attendance Log -->
+          <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px">
+              <div class="card-title" style="margin: 0">سجل الحضور - اليوم</div>
+              <button
+                class="btn btn-outline btn-sm"
+                onclick="loadAllHistory()"
+                title="افتراضياً يُعرض سجل آخر 14 يوم فقط لتوفير الاستهلاك. اضغط لتحميل كل الفترة."
+              >
+                📂 تحميل كل السجل (الفترة كاملة)
+              </button>
+            </div>
+            <p style="color: rgba(48, 56, 65, 0.4); font-size: 12px; margin: 6px 0 14px">
+              يُعرض سجل آخر 14 يوم افتراضياً لتقليل استهلاك قاعدة البيانات.
+            </p>
+            <input
+              type="text"
+              class="table-filter"
+              placeholder="🔍 بحث في الحضور (اسم / كود)..."
+              oninput="filterTableRows(this, 'attendance-log')"
+            />
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>الكود</th>
+                    <th>الاسم</th>
+                    <th>وقت الحضور</th>
+                    <th>الحالة</th>
+                  </tr>
+                </thead>
+                <tbody id="attendance-log">
+                  <tr>
+                    <td colspan="5" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                      لا توجد سجلات حضور لليوم
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== SESSIONS ==================== -->
+        <div class="section" id="section-sessions">
+          <div class="page-title">
+            <h2>الجلسات (الحصص الجارية)</h2>
+            <p>إدارة الجلسات الحالية لكل فرع — اختر الفرع أولاً لتجنّب اللغبطة</p>
+          </div>
+
+          <div class="card">
+            <div class="card-title">اختر الفرع</div>
+            <div class="form-group" style="max-width: 340px">
+              <label>الفرع</label>
+              <select id="session-branch-filter" onchange="renderSessionsList()">
+                <option value="">— اختر الفرع لعرض جلساته —</option>
+                <option value="فرع المريوطيه">فرع المريوطيه</option>
+                <option value="فرع الحدايق">فرع الحدايق</option>
+                <option value="فرع الهرم">فرع الهرم</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="card" id="session-schedule-card" style="display: none">
+            <div class="card-title">جدول المدربين — حدد أيام كل مدرب وميعاده</div>
+            <p style="color: rgba(48, 56, 65, 0.5); font-size: 13px; margin-bottom: 14px">
+              علّم على أيام التمرين في الأسبوع لكل مدرب وحدد ميعاد بدايته، ثم رتّب طابور اليوم بالأسهم وابدأ الجلسات منه
+              مباشرة.
+            </p>
+            <div id="coach-schedule-list"></div>
+            <div class="card-title" style="margin-top: 20px">طابور اليوم — مين هيبدأ الأول</div>
+            <div id="today-lineup"></div>
+          </div>
+
+          <div class="card" id="session-create-card" style="display: none">
+            <div class="card-title">بدء جلسة جديدة</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>اسم الجلسة</label>
+                <input type="text" id="session-name" placeholder="اختياري — يتولّد تلقائياً" />
+              </div>
+              <div class="form-group">
+                <label>نوع الجلسة</label>
+                <select id="session-type" onchange="onSessionTypeChange()">
+                  <option value="">حصة جماعية</option>
+                  <option value="private">تمرين برايفت</option>
+                </select>
+              </div>
+              <div class="form-group" id="session-price-group" style="display: none">
+                <label>سعر البرايفت</label>
+                <input type="number" id="session-price" placeholder="سعر الحصة (ج.م)" />
+              </div>
+              <div class="form-group">
+                <label>الرياضة</label>
+                <select id="session-sport"></select>
+              </div>
+              <div class="form-group">
+                <label>الجروب</label>
+                <select id="session-group" onchange="onSessionGroupChange()"></select>
+              </div>
+              <div class="form-group">
+                <label>المدرب</label>
+                <select id="session-coach"></select>
+              </div>
+              <div class="form-group">
+                <label>الموعد</label>
+                <input type="time" id="session-time" />
+              </div>
+            </div>
+            <button class="btn btn-primary" style="margin-top: 16px" onclick="createSession()">بدء الجلسة</button>
+          </div>
+
+          <div class="card" id="session-list-card" style="display: none">
+            <div class="card-title" style="justify-content: space-between">
+              <span>جلسات اليوم بالترتيب</span>
+              <button class="btn btn-outline btn-sm" onclick="sortSessionsByTime()">ترتيب حسب الموعد</button>
+            </div>
+            <div id="sessions-list" style="display: flex; flex-direction: column; gap: 12px"></div>
+          </div>
+        </div>
+
+        <!-- ==================== GROUPS ==================== -->
+        <div class="section" id="section-groups">
+          <div class="page-title">
+            <h2>الجروبات والمدربين</h2>
+            <p>تنظيم اللاعبين في مجموعات وتحضيرهم جماعياً</p>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px">
+            <!-- Create Group -->
+            <div class="card">
+              <div class="card-title">إنشاء جروب جديد</div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>اسم الجروب</label>
+                <input type="text" id="group-name" placeholder="مثال: جروب الناشئين" />
+              </div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>المدرب المسؤول</label>
+                <select id="group-trainer"></select>
+              </div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>الفرع *</label>
+                <select id="group-branch">
+                  <option value="" disabled selected>اختر الفرع</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" style="width: 100%" onclick="createGroup()">إنشاء الجروب</button>
+            </div>
+
+            <!-- Student Alerts -->
+            <div class="card">
+              <div class="card-title" style="color: var(--danger)">تنبيهات الطلاب (انقطاع / اشتراكات)</div>
+              <div
+                id="student-alerts"
+                style="display: flex; flex-direction: column; gap: 10px; max-height: 360px; overflow-y: auto"
+              ></div>
+            </div>
+          </div>
+
+          <!-- Groups List -->
+          <div class="card">
+            <div class="card-title">الجروبات</div>
+            <div id="groups-list" class="groups-grid"></div>
+          </div>
+        </div>
+
+        <!-- ==================== STAFF ATTENDANCE ==================== -->
+        <div class="section" id="section-staff-attendance">
+          <div class="page-title">
+            <h2>حضور الموظفين والمدربين</h2>
+            <p>تسجيل حضور وانصراف الموظفين، وطباعة تقرير يومي لكل فرع</p>
+          </div>
+
+          <div class="card">
+            <div class="card-title">تسجيل سريع بالكود</div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end">
+              <div class="form-group" style="flex: 1; min-width: 220px; margin-bottom: 0">
+                <label>كود الموظف / المدرب (حضور أو انصراف)</label>
+                <input
+                  type="text"
+                  id="staff-code"
+                  placeholder="مثال: Staff-0123"
+                  oninput="onStaffCodeInput()"
+                  autocomplete="off"
+                  style="text-align: center; font-family: monospace; letter-spacing: 2px"
+                />
+              </div>
+              <button class="btn btn-success" onclick="recordStaffByCode()">تسجيل</button>
+            </div>
+            <p style="color: rgba(48, 56, 65, 0.45); font-size: 12px; margin-top: 8px">
+              أول إدخال = حضور، والإدخال التاني لنفس اليوم = انصراف.
+            </p>
+          </div>
+
+          <div class="card">
+            <div class="card-title">قائمة الموظفين — حضور اليوم</div>
+            <input
+              type="text"
+              class="table-filter"
+              placeholder="🔍 بحث عن موظف (اسم / كود)..."
+              oninput="filterTableRows(this, 'staff-attendance-table')"
+            />
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الكود (ID)</th>
+                    <th>الاسم</th>
+                    <th>الوظيفة</th>
+                    <th>الفرع</th>
+                    <th>الحضور</th>
+                    <th>الانصراف</th>
+                    <th>بواسطة</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="staff-attendance-table">
+                  <tr>
+                    <td colspan="8" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                      لا يوجد موظفون — أضفهم من قسمي الموظفين والمدربين
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">تقرير حضور الموظفين</div>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end">
+              <div class="form-group" style="margin-bottom: 0">
+                <label>التاريخ</label>
+                <input type="date" id="staff-report-date" />
+              </div>
+              <button class="btn btn-primary" onclick="printStaffAttendance()">طباعة PDF (كل فرع في صفحة)</button>
+              <button
+                class="btn btn-primary"
+                onclick="printStaffCardsSheet()"
+                title="يجمع كل كروت الموظفين على ورقات A4 بمقاسها الصحيح مع خطوط قص — جاهزة للمطبعة"
+              >
+                🖨️ طباعة كل كروت الموظفين (A4)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== COACHES ==================== -->
+        <div class="section" id="section-coaches">
+          <div class="page-title">
+            <h2>إدارة المدربين</h2>
+            <p>المدربون ورواتبهم (شهري أو بالنسبة) والسلف والصرف</p>
+          </div>
+
+          <div class="card">
+            <div class="card-title">إضافة مدرب</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>اسم المدرب *</label>
+                <input type="text" id="coach-name" placeholder="الاسم الكامل" />
+              </div>
+              <div class="form-group">
+                <label>رقم الهاتف</label>
+                <input type="tel" id="coach-phone" placeholder="01XXXXXXXXX" />
+              </div>
+              <div class="form-group">
+                <label>التخصص</label>
+                <select id="coach-specialty"></select>
+              </div>
+              <div class="form-group">
+                <label>الفرع *</label>
+                <select id="coach-branch">
+                  <option value="" disabled selected>اختر الفرع</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>نوع التعاقد *</label>
+                <select id="coach-pay-type" onchange="toggleCoachPayType()">
+                  <option value="monthly">راتب شهري ثابت</option>
+                  <option value="percentage">نسبة (عمولة)</option>
+                </select>
+              </div>
+              <div class="form-group" id="coach-salary-group">
+                <label>الراتب الشهري (ج.م)</label>
+                <input type="number" id="coach-salary" placeholder="المبلغ" />
+              </div>
+              <div class="form-group" id="coach-rate-group" style="display: none">
+                <label>النسبة (%)</label>
+                <input type="number" id="coach-rate" placeholder="مثال: 20" />
+              </div>
+              <div class="form-group">
+                <label>جروبات المدرب * (جروب واحد على الأقل)</label>
+                <div style="display: flex; gap: 8px">
+                  <input type="text" id="coach-groups" placeholder="اسم الجروب — مثال: جروب أ" style="flex: 1" />
+                  <button type="button" class="btn btn-outline btn-sm" onclick="addCoachGroup()">➕ أضف جروب</button>
+                </div>
+                <div id="coach-groups-list" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px"></div>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="margin-top: 20px" onclick="addCoach()">إضافة المدرب</button>
+          </div>
+
+          <div class="card">
+            <div class="card-title">قائمة المدربين والرواتب</div>
+            <input
+              type="text"
+              class="table-filter"
+              placeholder="🔍 بحث عن مدرب (اسم / تخصص / فرع)..."
+              oninput="filterTableRows(this, 'coaches-table')"
+            />
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الاسم</th>
+                    <th>التخصص</th>
+                    <th>الفرع</th>
+                    <th>نوع التعاقد</th>
+                    <th>مصروف هذا الشهر</th>
+                    <th>عدد الجروبات</th>
+                    <th>بواسطة</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="coaches-table">
+                  <tr>
+                    <td colspan="8" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                      لا يوجد مدربون مسجلون
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Coach comparison: who brings in more money / more players -->
+            <div class="card" style="margin-top: 20px">
+              <div class="card-title">مقارنة المدربين — الأعلى تحصيلاً وعدداً للاعبين</div>
+              <p style="color: rgba(48, 56, 65, 0.5); font-size: 13px; margin-bottom: 14px">
+                عدد اللاعبين المضافين داخل جروبات المدرب نفسه، وإجمالي المحصّل من مدفوعات هؤلاء اللاعبين تحديداً.
+              </p>
+              <div id="coach-compare"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== FINANCIAL ==================== -->
+        <div class="section" id="section-financial">
+          <div class="page-title">
+            <h2>تجديد الاشتراكات</h2>
+            <p>إدارة الاشتراكات والتجديدات والمدفوعات</p>
+          </div>
+
+          <!-- Financial Summary -->
+          <div class="financial-summary">
+            <div class="fin-card">
+              <div class="fin-amount" style="color: var(--success)" id="fin-income">0 ج.م</div>
+              <div class="fin-label">إجمالي الإيرادات</div>
+            </div>
+            <div class="fin-card">
+              <div class="fin-amount" style="color: var(--danger)" id="fin-expenses">0 ج.م</div>
+              <div class="fin-label">إجمالي المصروفات</div>
+            </div>
+            <div class="fin-card">
+              <div class="fin-amount" style="color: var(--warning)" id="fin-profit">0 ج.م</div>
+              <div class="fin-label">صافي الربح</div>
+            </div>
+          </div>
+
+          <!-- Renewal Form -->
+          <div class="card">
+            <div class="card-title">تجديد اشتراك</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>كود اللاعب</label>
+                <input type="text" id="renew-code" placeholder="أدخل الكود" oninput="searchTraineeForRenewal()" />
+              </div>
+              <div class="form-group">
+                <label>اسم اللاعب</label>
+                <input type="text" id="renew-name" placeholder="سيظهر تلقائياً" readonly />
+              </div>
+              <div class="form-group">
+                <label id="renew-duration-label">مدة التجديد (بالأيام)</label>
+                <input type="number" id="renew-duration" placeholder="مثال: 30" value="30" />
+              </div>
+              <div class="form-group">
+                <label>المبلغ المدفوع</label>
+                <input type="number" id="renew-amount" placeholder="المبلغ بالجنيه" />
+              </div>
+              <div class="form-group">
+                <label>طريقة الدفع</label>
+                <select id="renew-method">
+                  <option>نقداً</option>
+                  <option>تحويل بنكي</option>
+                  <option>فودافون كاش</option>
+                  <option>انستا باي</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>تاريخ التجديد</label>
+                <input type="date" id="renew-date" />
+              </div>
+              <div class="form-group">
+                <label>الفرع *</label>
+                <select id="renew-branch">
+                  <option value="" disabled selected>اختر الفرع</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="margin-top: 20px" onclick="renewSubscription()">
+              تأكيد التجديد
+            </button>
+          </div>
+
+          <!-- Payments Table -->
+          <div class="card">
+            <div class="card-title">سجل المدفوعات</div>
+            <input
+              type="text"
+              class="table-filter"
+              placeholder="🔍 بحث في المدفوعات (اسم / نوع / فرع)..."
+              oninput="filterTableRows(this, 'payments-table')"
+            />
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الكود</th>
+                    <th>الاسم</th>
+                    <th>نوع العملية</th>
+                    <th>الخطة</th>
+                    <th>الفرع</th>
+                    <th>المبلغ</th>
+                    <th>طريقة الدفع</th>
+                    <th>التاريخ</th>
+                    <th>الحالة</th>
+                    <th>بواسطة</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="payments-table">
+                  <tr>
+                    <td colspan="11" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                      لا توجد مدفوعات مسجلة
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Pending refund requests -->
+          <div class="card">
+            <div class="card-title">طلبات الاسترداد المعلّقة</div>
+            <p style="color: rgba(48, 56, 65, 0.5); font-size: 13px; margin-bottom: 14px">
+              طلبات إلغاء الاشتراك بانتظار قرار المدير. عند الموافقة يُخصم المبلغ كمصروف ويُلغى الاشتراك.
+            </p>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الكود</th>
+                    <th>الاسم</th>
+                    <th>اللعبة</th>
+                    <th>المسؤول</th>
+                    <th>النسبة</th>
+                    <th>سبب الإلغاء</th>
+                    <th>المبلغ</th>
+                    <th>القرار</th>
+                  </tr>
+                </thead>
+                <tbody id="refunds-list">
+                  <tr>
+                    <td colspan="8" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 20px">
+                      لا توجد طلبات استرداد معلّقة
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== EXTRA INCOME (بطولات / اختبارات / كشف طبي) ==================== -->
+        <div class="section" id="section-extra-income">
+          <div class="page-title">
+            <h2>إيرادات إضافية</h2>
+            <p>تسجيل فلوس البطولات والاختبارات والكشف الطبي — اختر لاعباً موجوداً أو اكتب اسماً يدوياً</p>
+          </div>
+
+          <!-- Add extra income -->
+          <div class="card">
+            <div class="card-title">إضافة إيراد</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>اللاعب (اختر بالاسم أو الكود، أو اكتب اسماً يدوياً)</label>
+                <input
+                  type="text"
+                  id="extra-player"
+                  list="extra-player-list"
+                  placeholder="ابحث بالاسم أو الكود، أو اكتب اسماً جديداً"
+                  autocomplete="off"
+                />
+                <datalist id="extra-player-list"></datalist>
+              </div>
+              <div class="form-group">
+                <label>النوع *</label>
+                <select id="extra-type" onchange="onExtraTypeChange()">
+                  <option value="بطولة">بطولة</option>
+                  <option value="كشف طبي">كشف طبي</option>
+                  <option value="مبيعات">مبيعات (أدوات)</option>
+                  <option value="اختبار">اختبار</option>
+                  <option value="قيد/كارنيه">قيد سنوي / كارنيه</option>
+                  <option value="أخرى">أخرى</option>
+                </select>
+              </div>
+              <!-- Sales item: shown only for the "مبيعات" type. A datalist gives ready
+ presets (نت/لوكر/استك/جلفز...) but any custom item can still be typed. -->
+              <div class="form-group" id="extra-sales-item-group" style="display: none">
+                <label>الصنف (اختر أو اكتب) *</label>
+                <input
+                  type="text"
+                  id="extra-sales-item"
+                  list="extra-sales-list"
+                  placeholder="مثال: استك / جلفز / نت / لوكر"
+                  autocomplete="off"
+                />
+                <datalist id="extra-sales-list">
+                  <option value="نت"></option>
+                  <option value="لوكر"></option>
+                  <option value="استك"></option>
+                  <option value="جلفز"></option>
+                  <option value="أوزان / ويتس"></option>
+                  <option value="مانزيا"></option>
+                  <option value="بدلة كونغ فو"></option>
+                  <option value="شورت / مايوه"></option>
+                  <option value="أرضية"></option>
+                </datalist>
+              </div>
+              <div class="form-group">
+                <label>البيان (اختياري)</label>
+                <input type="text" id="extra-desc" placeholder="مثال: بطولة الجمهورية — يوليو" />
+              </div>
+              <div class="form-group">
+                <label>المبلغ *</label>
+                <input type="number" id="extra-amount" placeholder="المبلغ بالجنيه" />
+              </div>
+              <div class="form-group">
+                <label>طريقة الدفع</label>
+                <select id="extra-method">
+                  <option>نقداً</option>
+                  <option>تحويل بنكي</option>
+                  <option>فودافون كاش</option>
+                  <option>انستا باي</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>التاريخ</label>
+                <input type="date" id="extra-date" />
+              </div>
+              <div class="form-group">
+                <label>الفرع *</label>
+                <select id="extra-branch">
+                  <option value="" disabled selected>اختر الفرع</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="margin-top: 20px" onclick="addExtraIncome()">إضافة الإيراد</button>
+          </div>
+
+          <!-- Extra income list -->
+          <div class="card">
+            <div class="card-title" style="justify-content: space-between">
+              <span>سجل الإيرادات الإضافية</span>
+              <span class="badge badge-success" id="extra-total">0 ج.م</span>
+            </div>
+            <div style="overflow-x: auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>النوع</th>
+                    <th>اللاعب</th>
+                    <th>البيان</th>
+                    <th>الفرع</th>
+                    <th>المبلغ</th>
+                    <th>طريقة الدفع</th>
+                    <th>التاريخ</th>
+                    <th>بواسطة</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="extra-income-table"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== SALARIES ==================== -->
+        <div class="section" id="section-salaries">
+          <div class="page-title">
+            <h2>إدارة المرتبات والإيجار</h2>
+            <p>متابعة المصروفات التشغيلية</p>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px">
+            <!-- Add Employee -->
+            <div class="card" id="card-add-employee">
+              <div class="card-title">إضافة موظف</div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>اسم الموظف</label>
+                <input type="text" id="emp-name" placeholder="الاسم الكامل" />
+              </div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>رقم الهاتف</label>
+                <input type="tel" id="emp-phone" placeholder="01XXXXXXXXX" />
+              </div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>الوظيفة</label>
+                <select id="emp-role" onchange="toggleEmpRoleOther()">
+                  <option>موظف استقبال</option>
+                  <option>اداري</option>
+                  <option>عامل نظافة</option>
+                  <option>أخرى</option>
+                </select>
+                <input
+                  type="text"
+                  id="emp-role-other"
+                  placeholder="اكتب الوظيفة — مثال: أمين مخزن"
+                  style="display: none; margin-top: 8px"
+                />
+                <p style="font-size: 11px; color: rgba(48, 56, 65, 0.45); margin-top: 6px">
+                  المدربون يُضافون من قسم "المدربون" المخصص.
+                </p>
+              </div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>الراتب الشهري (ج.م)</label>
+                <input type="number" id="emp-salary" placeholder="المبلغ" />
+              </div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>الفرع *</label>
+                <select id="emp-branch">
+                  <option value="" disabled selected>اختر الفرع</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" style="width: 100%" onclick="addEmployee()">إضافة الموظف</button>
+            </div>
+
+            <!-- Add Expense -->
+            <div class="card">
+              <div class="card-title">إضافة مصروف / إيجار</div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>نوع المصروف</label>
+                <select id="expense-type">
+                  <option>إيجار شهري</option>
+                  <option>فواتير كهرباء</option>
+                  <option>فواتير مياه</option>
+                  <option>صيانة</option>
+                  <option>تجهيزات</option>
+                  <option>أخرى</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>الوصف</label>
+                <input type="text" id="expense-desc" placeholder="وصف المصروف" />
+              </div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>المبلغ (ج.م)</label>
+                <input type="number" id="expense-amount" placeholder="المبلغ" />
+              </div>
+              <div class="form-group" style="margin-bottom: 15px">
+                <label>الفرع *</label>
+                <select id="expense-branch">
+                  <option value="" disabled selected>اختر الفرع</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+              <button class="btn btn-warning" style="width: 100%" onclick="addExpense()">إضافة المصروف</button>
+            </div>
+          </div>
+
+          <!-- Employees Table -->
+          <div class="card" id="card-employees-table">
+            <div class="card-title">قائمة الموظفين والمرتبات</div>
+            <input
+              type="text"
+              class="table-filter"
+              placeholder="🔍 بحث عن موظف (اسم / وظيفة / فرع)..."
+              oninput="filterTableRows(this, 'employees-table')"
+            />
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>الاسم</th>
+                    <th>الهاتف</th>
+                    <th>الوظيفة</th>
+                    <th>الفرع</th>
+                    <th>الراتب</th>
+                    <th>الحالة</th>
+                    <th>بواسطة</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="employees-table">
+                  <tr>
+                    <td colspan="9" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                      لا يوجد موظفون مسجلون
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Expenses Table -->
+          <div class="card" id="card-expenses-table">
+            <div class="card-title">سجل المصروفات والإيجار</div>
+            <input
+              type="text"
+              class="table-filter"
+              placeholder="🔍 بحث في المصروفات (نوع / وصف / فرع)..."
+              oninput="filterTableRows(this, 'expenses-table')"
+            />
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>النوع</th>
+                    <th>الوصف</th>
+                    <th>الفرع</th>
+                    <th>المبلغ</th>
+                    <th>التاريخ</th>
+                    <th>بواسطة</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="expenses-table">
+                  <tr>
+                    <td colspan="8" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                      لا توجد مصروفات مسجلة
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== FINANCIAL DASHBOARD ==================== -->
+        <div class="section" id="section-financial-dashboard">
+          <div class="page-title">
+            <h2>الداشبورد المالي</h2>
+            <p>تحليل مالي شامل ومفصل لكل فرع — كل معاملة، كل جنيه</p>
+          </div>
+
+          <!-- Filters Bar -->
+          <div class="fd-filters-bar">
+            <div class="fd-filter-group">
+              <label for="fd-branch-filter">الفرع</label>
+              <select id="fd-branch-filter" onchange="renderFinancialDashboard()">
+                <option value="الكل">كل الفروع</option>
+                <option value="فرع المريوطيه">فرع المريوطيه</option>
+                <option value="فرع الحدايق">فرع الحدايق</option>
+                <option value="فرع الهرم">فرع الهرم</option>
+              </select>
+            </div>
+            <div class="fd-filter-group">
+              <label>الفترة</label>
+              <div style="display: flex; gap: 8px">
+                <button id="fd-period-this" class="btn btn-sm btn-outline" onclick="fdSetPeriod('this')">
+                  الشهر الحالي
+                </button>
+                <button id="fd-period-last" class="btn btn-sm btn-outline" onclick="fdSetPeriod('last')">
+                  الشهر الماضي
+                </button>
+                <button id="fd-period-all" class="btn btn-sm btn-outline" onclick="fdSetPeriod('all')">
+                  كل الفترة
+                </button>
+              </div>
+            </div>
+            <div class="fd-filter-group">
+              <label for="fd-date-from">من تاريخ</label>
+              <input
+                type="date"
+                id="fd-date-from"
+                onchange="
+                  clearFDPeriodHighlight();
+                  renderFinancialDashboard();
+                "
+              />
+            </div>
+            <div class="fd-filter-group">
+              <label for="fd-date-to">إلى تاريخ</label>
+              <input
+                type="date"
+                id="fd-date-to"
+                onchange="
+                  clearFDPeriodHighlight();
+                  renderFinancialDashboard();
+                "
+              />
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="resetFDFilters()" style="align-self: flex-end">
+              إعادة تعيين
+            </button>
+            <button
+              class="btn btn-primary btn-sm"
+              onclick="exportFinancialDashboardReport()"
+              style="align-self: flex-end"
+            >
+              طباعة التقرير المالي
+            </button>
+          </div>
+
+          <!-- KPI Cards -->
+          <div class="fd-kpi-grid">
+            <div class="fd-kpi-card fd-kpi-income">
+              <div class="fd-kpi-icon" style="font-weight: bold">اجمالي الايردات</div>
+              <div class="fd-kpi-value" id="fd-total-income" style="color: #28a745">0 ج.م</div>
+              <div class="fd-kpi-label"></div>
+              <div class="fd-kpi-detail" id="fd-income-count">0 عملية</div>
+            </div>
+            <div class="fd-kpi-card fd-kpi-expense">
+              <div class="fd-kpi-icon" style="font-weight: bold">اجمالي المصروفات</div>
+              <div class="fd-kpi-value" id="fd-total-expenses" style="color: #dc3545">0 ج.م</div>
+              <div class="fd-kpi-label"></div>
+              <div class="fd-kpi-detail" id="fd-expense-count">0 عملية</div>
+            </div>
+            <div class="fd-kpi-card fd-kpi-salary">
+              <div class="fd-kpi-icon" style="font-weight: bold">اجمالي المرتبات</div>
+              <div class="fd-kpi-value" id="fd-total-salaries" style="color: #ffc107">0 ج.م</div>
+              <div class="fd-kpi-label"></div>
+              <div class="fd-kpi-detail" id="fd-salary-count">0 موظف</div>
+            </div>
+            <div class="fd-kpi-card fd-kpi-profit">
+              <div class="fd-kpi-icon" style="font-weight: bold">صافي الربح</div>
+              <div class="fd-kpi-value" id="fd-net-profit" style="color: #28a745">0 ج.م</div>
+              <div class="fd-kpi-label"></div>
+              <div class="fd-kpi-detail" id="fd-profit-margin">هامش الربح: 0%</div>
+            </div>
+            <div class="fd-kpi-card fd-kpi-new-subs">
+              <div class="fd-kpi-icon" style="font-weight: bold">إيرادات الاشتراكات الجديدة</div>
+              <div class="fd-kpi-value" id="fd-new-subs" style="color: #28a745">0 ج.م</div>
+              <div class="fd-kpi-label"></div>
+              <div class="fd-kpi-detail" id="fd-new-subs-count">0 اشتراك</div>
+            </div>
+            <div class="fd-kpi-card fd-kpi-renewals">
+              <div class="fd-kpi-icon" style="font-weight: bold">إيرادات التجديدات</div>
+              <div class="fd-kpi-value" id="fd-renewals" style="color: #28a745">0 ج.م</div>
+              <div class="fd-kpi-label"></div>
+              <div class="fd-kpi-detail" id="fd-renewals-count">0 تجديد</div>
+            </div>
+          </div>
+
+          <!-- Monthly targets per branch (forecast from existing data) -->
+          <div class="card">
+            <div class="card-title">🎯 توقّع التارجت الشهري لكل فرع</div>
+            <p style="color: rgba(48, 56, 65, 0.5); font-size: 13px; margin-bottom: 14px">
+              المستهدف محسوب من متوسط آخر 3 شهور للفرع مع اتجاه النمو، والمحقّق هو إيراد الشهر الحالي حتى الآن.
+            </p>
+            <div id="fd-targets-content"></div>
+          </div>
+
+          <!-- Branch Comparison (only visible when "All" selected) -->
+          <div class="card" id="fd-branch-comparison-card" style="display: none">
+            <div class="card-title">📊 مقارنة أداء الفروع</div>
+            <div id="fd-branch-comparison-content"></div>
+          </div>
+
+          <!-- Income Breakdown -->
+          <div class="card">
+            <div class="card-title" style="justify-content: space-between">
+              <span>💵 تفاصيل الإيرادات</span>
+              <span class="badge badge-success" id="fd-income-badge">0 ج.م</span>
+            </div>
+            <!-- Income by Type -->
+            <div class="fd-breakdown-grid" id="fd-income-breakdown"></div>
+            <!-- Income by Payment Method -->
+            <h4
+              style="
+                font-size: 14px;
+                font-weight: 700;
+                color: var(--accent);
+                margin: 20px 0 12px;
+                padding-top: 15px;
+                border-top: 1px solid rgba(48, 56, 65, 0.08);
+              "
+            >
+              توزيع الإيرادات حسب طريقة الدفع
+            </h4>
+            <div class="fd-breakdown-grid" id="fd-income-by-method"></div>
+            <!-- Full Income Table -->
+            <h4
+              style="
+                font-size: 14px;
+                font-weight: 700;
+                color: var(--accent);
+                margin: 20px 0 12px;
+                padding-top: 15px;
+                border-top: 1px solid rgba(48, 56, 65, 0.08);
+              "
+            >
+              سجل الإيرادات التفصيلي (كل عملية)
+            </h4>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>الكود</th>
+                    <th>الاسم</th>
+                    <th>النوع</th>
+                    <th>الرياضة</th>
+                    <th>الفرع</th>
+                    <th>المبلغ</th>
+                    <th>طريقة الدفع</th>
+                    <th>التاريخ</th>
+                    <th>بواسطة</th>
+                  </tr>
+                </thead>
+                <tbody id="fd-income-table"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Expenses Breakdown -->
+          <div class="card">
+            <div class="card-title" style="justify-content: space-between">
+              <span>📤 تفاصيل المصروفات</span>
+              <span class="badge badge-danger" id="fd-expense-badge">0 ج.م</span>
+            </div>
+            <!-- Expense by Type -->
+            <div class="fd-breakdown-grid" id="fd-expense-breakdown"></div>
+            <!-- Full Expenses Table -->
+            <h4
+              style="
+                font-size: 14px;
+                font-weight: 700;
+                color: var(--accent);
+                margin: 20px 0 12px;
+                padding-top: 15px;
+                border-top: 1px solid rgba(48, 56, 65, 0.08);
+              "
+            >
+              سجل المصروفات التفصيلي (كل عملية)
+            </h4>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>الكود</th>
+                    <th>النوع</th>
+                    <th>الوصف</th>
+                    <th>الفرع</th>
+                    <th>المبلغ</th>
+                    <th>التاريخ</th>
+                    <th>بواسطة</th>
+                  </tr>
+                </thead>
+                <tbody id="fd-expense-table"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Salary Breakdown -->
+          <div class="card">
+            <div class="card-title" style="justify-content: space-between">
+              <span>👥 تفاصيل المرتبات المصروفة</span>
+              <span class="badge badge-warning" id="fd-salary-badge">0 ج.م</span>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>الكود</th>
+                    <th>الوصف</th>
+                    <th>الفرع</th>
+                    <th>المبلغ</th>
+                    <th>التاريخ</th>
+                    <th>بواسطة</th>
+                  </tr>
+                </thead>
+                <tbody id="fd-salary-table"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- All Transactions Combined -->
+          <div class="card">
+            <div class="card-title">📋 كشف حساب شامل (كل الحركات المالية مرتبة بالتاريخ)</div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>النوع</th>
+                    <th>البيان</th>
+                    <th>الفرع</th>
+                    <th>وارد</th>
+                    <th>منصرف</th>
+                    <th>التاريخ</th>
+                    <th>بواسطة</th>
+                  </tr>
+                </thead>
+                <tbody id="fd-all-transactions-table"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== REPORTS ==================== -->
+        <div class="section" id="section-reports">
+          <div class="page-title">
+            <h2>التقارير والإحصائيات</h2>
+            <p>تقارير شاملة لجميع الأقسام</p>
+          </div>
+
+          <!-- (3) Date-range loader: pull only the chosen period instead of all
  history, to keep report reads small. "تحميل كل الفترة" loads everything. -->
- <div class="card" style="margin-bottom: 20px;">
- <div class="card-title">فترة التقرير</div>
- <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
- <div class="form-group" style="margin-bottom:0;">
- <label>من</label>
- <input type="date" id="report-from">
- </div>
- <div class="form-group" style="margin-bottom:0;">
- <label>إلى</label>
- <input type="date" id="report-to">
- </div>
- <button class="btn btn-primary" onclick="loadReportRange()">عرض الفترة</button>
- <button class="btn btn-outline" onclick="loadAllHistory()">تحميل كل الفترة (كامل)</button>
- </div>
- <p style="color: rgba(48,56,65,0.4); font-size: 12px; margin-top:10px;">يُحمَّل آخر شهر افتراضياً. اختر فترة أوسع لتقرير أدق.</p>
- </div>
+          <div class="card" style="margin-bottom: 20px">
+            <div class="card-title">فترة التقرير</div>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end">
+              <div class="form-group" style="margin-bottom: 0">
+                <label>من</label>
+                <input type="date" id="report-from" />
+              </div>
+              <div class="form-group" style="margin-bottom: 0">
+                <label>إلى</label>
+                <input type="date" id="report-to" />
+              </div>
+              <button class="btn btn-primary" onclick="loadReportRange()">عرض الفترة</button>
+              <button class="btn btn-outline" onclick="loadAllHistory()">تحميل كل الفترة (كامل)</button>
+            </div>
+            <p style="color: rgba(48, 56, 65, 0.4); font-size: 12px; margin-top: 10px">
+              يُحمَّل آخر شهر افتراضياً. اختر فترة أوسع لتقرير أدق.
+            </p>
+          </div>
 
- <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
- <!-- Members Report -->
- <div class="card">
- <div class="card-title">تقرير اللاعبين</div>
- <div id="members-report" style="display: flex; flex-direction: column; gap: 12px;"></div>
- </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px">
+            <!-- Members Report -->
+            <div class="card">
+              <div class="card-title">تقرير اللاعبين</div>
+              <div id="members-report" style="display: flex; flex-direction: column; gap: 12px"></div>
+            </div>
 
- <!-- Financial Report -->
- <div class="card">
- <div class="card-title">التقرير المالي</div>
- <div id="financial-report" style="display: flex; flex-direction: column; gap: 12px;"></div>
- </div>
+            <!-- Financial Report -->
+            <div class="card">
+              <div class="card-title">التقرير المالي</div>
+              <div id="financial-report" style="display: flex; flex-direction: column; gap: 12px"></div>
+            </div>
 
- <!-- Attendance Report -->
- <div class="card">
- <div class="card-title">تقرير الحضور</div>
- <div id="attendance-report" style="display: flex; flex-direction: column; gap: 12px;"></div>
- </div>
- </div>
+            <!-- Attendance Report -->
+            <div class="card">
+              <div class="card-title">تقرير الحضور</div>
+              <div id="attendance-report" style="display: flex; flex-direction: column; gap: 12px"></div>
+            </div>
+          </div>
 
- <!-- Daily Financial Report -->
- <div class="card" style="margin-top: 20px;">
- <div class="card-title">تقرير يومي مالي (الإيرادات والمصروفات وصافي الربح)</div>
- <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;">
- <div class="form-group" style="margin-bottom:0;">
- <label>التاريخ</label>
- <input type="date" id="daily-date">
- </div>
- <div class="form-group" style="margin-bottom:0;">
- <label>الفرع</label>
- <select id="daily-branch">
- <option value="الكل">كل الفروع</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- <button class="btn btn-primary" onclick="renderDailyReport()">عرض التقرير</button>
- <button class="btn btn-outline" onclick="printDailyReport()">طباعة PDF</button>
- </div>
- <div id="daily-report-result" style="margin-top: 18px;"></div>
- </div>
+          <!-- Daily Financial Report -->
+          <div class="card" style="margin-top: 20px">
+            <div class="card-title">تقرير يومي مالي (الإيرادات والمصروفات وصافي الربح)</div>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end">
+              <div class="form-group" style="margin-bottom: 0">
+                <label>التاريخ</label>
+                <input type="date" id="daily-date" />
+              </div>
+              <div class="form-group" style="margin-bottom: 0">
+                <label>الفرع</label>
+                <select id="daily-branch">
+                  <option value="الكل">كل الفروع</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" onclick="renderDailyReport()">عرض التقرير</button>
+              <button class="btn btn-outline" onclick="printDailyReport()">طباعة PDF</button>
+            </div>
+            <div id="daily-report-result" style="margin-top: 18px"></div>
+          </div>
 
- <!-- Monthly Financial Report -->
- <div class="card" style="margin-top: 20px;">
- <div class="card-title">تقرير شهري مالي</div>
- <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
- <div class="form-group" style="margin-bottom:0;">
- <label>الشهر</label>
- <input type="month" id="monthly-month">
- </div>
- <div class="form-group" style="margin-bottom:0;">
- <label>الفرع</label>
- <select id="monthly-branch">
- <option value="الكل">كل الفروع</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- <button class="btn btn-primary" onclick="renderMonthlyReport()">عرض</button>
- <button class="btn btn-outline" onclick="printMonthlyReport()">طباعة PDF</button>
- </div>
- <div id="monthly-report-result" style="margin-top:18px;"></div>
- </div>
+          <!-- Monthly Financial Report -->
+          <div class="card" style="margin-top: 20px">
+            <div class="card-title">تقرير شهري مالي</div>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end">
+              <div class="form-group" style="margin-bottom: 0">
+                <label>الشهر</label>
+                <input type="month" id="monthly-month" />
+              </div>
+              <div class="form-group" style="margin-bottom: 0">
+                <label>الفرع</label>
+                <select id="monthly-branch">
+                  <option value="الكل">كل الفروع</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" onclick="renderMonthlyReport()">عرض</button>
+              <button class="btn btn-outline" onclick="printMonthlyReport()">طباعة PDF</button>
+            </div>
+            <div id="monthly-report-result" style="margin-top: 18px"></div>
+          </div>
 
- <div class="card" style="margin-top: 20px;">
- <div class="card-title">تصدير التقارير</div>
- <div class="form-group" style="max-width: 280px; margin-bottom: 16px;">
- <label>نمط الطباعة</label>
- <select id="report-scope">
- <option value="branch">كل فرع في صفحة منفصلة</option>
- <option value="combined">تقرير مجمّع (كل الفروع معاً)</option>
- </select>
- </div>
- <div style="display: flex; gap: 15px; flex-wrap: wrap;">
- <button class="btn btn-primary" onclick="exportReport('members')">تقرير اللاعبين
- </button>
- <button class="btn btn-success" onclick="exportReport('financial')">التقرير المالي
- </button>
- <button class="btn btn-warning" onclick="exportReport('attendance')">تقرير الحضور
- </button>
- <button class="btn btn-outline" onclick="printReport()">طباعة الكل
- </button>
- </div>
- </div>
+          <div class="card" style="margin-top: 20px">
+            <div class="card-title">تصدير التقارير</div>
+            <div class="form-group" style="max-width: 280px; margin-bottom: 16px">
+              <label>نمط الطباعة</label>
+              <select id="report-scope">
+                <option value="branch">كل فرع في صفحة منفصلة</option>
+                <option value="combined">تقرير مجمّع (كل الفروع معاً)</option>
+              </select>
+            </div>
+            <div style="display: flex; gap: 15px; flex-wrap: wrap">
+              <button class="btn btn-primary" onclick="exportReport('members')">تقرير اللاعبين</button>
+              <button class="btn btn-success" onclick="exportReport('financial')">التقرير المالي</button>
+              <button class="btn btn-warning" onclick="exportReport('attendance')">تقرير الحضور</button>
+              <button class="btn btn-outline" onclick="printReport()">طباعة الكل</button>
+            </div>
+          </div>
 
- <!-- Backup & Restore (admin-only section) -->
- <div class="card" style="margin-top: 20px;">
- <div class="card-title">النسخ الاحتياطي واستعادة النظام</div>
- <p style="color: rgba(48,56,65,0.6); margin-bottom: 16px;">نزّل نسخة كاملة من كل بيانات النظام (كل الأقسام في ملف واحد)، أو استرجعها لو حصل أي عطل في قاعدة البيانات. يُنصح بتنزيل نسخة كل فترة.</p>
- <div style="display:flex; gap:15px; flex-wrap:wrap; align-items:center;">
- <button class="btn btn-primary" onclick="backupAllData()">⬇ تنزيل نسخة احتياطية كاملة</button>
- <button class="btn btn-danger" onclick="triggerRestore()">⬆ استرجاع من نسخة احتياطية</button>
- <input type="file" id="restore-file-input" accept="application/json,.json" style="display:none" onchange="restoreAllData(this)">
- <span id="backup-last" style="color: rgba(48,56,65,0.5); font-size: 13px;"></span>
- </div>
- </div>
+          <!-- Per-type revenue reports: print each revenue type on its own -->
+          <div class="card" style="margin-top: 20px">
+            <div class="card-title">تقارير الإيرادات حسب النوع (طباعة كل نوع منفصل)</div>
+            <p style="color: rgba(48, 56, 65, 0.5); font-size: 13px; margin-bottom: 14px">
+              اطبع تقرير مستقل لكل نوع إيراد على حدة — يتبع نفس الفرع/الفترة ونمط الطباعة (كل فرع في صفحة أو مجمّع)
+              المختار بالأعلى.
+            </p>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end">
+              <div class="form-group" style="max-width: 260px; margin-bottom: 0">
+                <label>نوع الإيراد</label>
+                <select id="report-cat">
+                  <option value="subscription">اشتراكات</option>
+                  <option value="tournament">بطولات</option>
+                  <option value="medical">كشوفات طبية</option>
+                  <option value="sales">مبيعات (أدوات)</option>
+                  <option value="other">أخرى (قيد/كارنيه/اختبارات/إيجار)</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" onclick="exportCategoryReport()">🖨️ طباعة تقرير هذا النوع</button>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px">
+              <button
+                class="btn btn-sm btn-outline"
+                onclick="
+                  document.getElementById('report-cat').value = 'subscription';
+                  exportCategoryReport();
+                "
+              >
+                اشتراكات
+              </button>
+              <button
+                class="btn btn-sm btn-outline"
+                onclick="
+                  document.getElementById('report-cat').value = 'tournament';
+                  exportCategoryReport();
+                "
+              >
+                بطولات
+              </button>
+              <button
+                class="btn btn-sm btn-outline"
+                onclick="
+                  document.getElementById('report-cat').value = 'medical';
+                  exportCategoryReport();
+                "
+              >
+                كشوفات طبية
+              </button>
+              <button
+                class="btn btn-sm btn-outline"
+                onclick="
+                  document.getElementById('report-cat').value = 'sales';
+                  exportCategoryReport();
+                "
+              >
+                مبيعات
+              </button>
+              <button
+                class="btn btn-sm btn-outline"
+                onclick="
+                  document.getElementById('report-cat').value = 'other';
+                  exportCategoryReport();
+                "
+              >
+                أخرى
+              </button>
+            </div>
+          </div>
 
- <!-- Feedback / Complaints -->
- <div class="card" style="margin-top: 20px;">
- <div class="card-title">الشكاوى والملاحظات (Feedback)</div>
- <div class="form-grid">
- <div class="form-group">
- <label>الاسم (اختياري)</label>
- <input type="text" id="feedback-name" placeholder="اسم صاحب الشكوى">
- </div>
- <div class="form-group">
- <label>الفرع</label>
- <select id="feedback-branch">
- <option value="غير محدد">غير محدد</option>
- <option value="فرع المريوطيه">فرع المريوطيه</option>
- <option value="فرع الحدايق">فرع الحدايق</option>
- <option value="فرع الهرم">فرع الهرم</option>
- </select>
- </div>
- <div class="form-group">
- <label>النوع</label>
- <select id="feedback-type">
- <option>شكوى</option>
- <option>اقتراح</option>
- <option>ملاحظة</option>
- </select>
- </div>
- </div>
- <div class="form-group" style="margin-top:14px;">
- <label>التفاصيل *</label>
- <input type="text" id="feedback-text" placeholder="اكتب الشكوى أو الملاحظة">
- </div>
- <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
- <button class="btn btn-primary" onclick="addFeedback()">تسجيل</button>
- <button class="btn btn-outline" onclick="printFeedback()">طباعة الشكاوى PDF</button>
- </div>
- <div class="table-container" style="margin-top:18px;">
- <table>
- <thead><tr><th>التاريخ</th><th>النوع</th><th>الاسم</th><th>الفرع</th><th>التفاصيل</th><th>بواسطة</th><th>إجراء</th></tr></thead>
- <tbody id="feedback-table"><tr><td colspan="7" style="text-align:center; color:rgba(48,56,65,0.3); padding:20px;">لا توجد شكاوى مسجلة</td></tr></tbody>
- </table>
- </div>
- </div>
- </div>
+          <!-- Backup & Restore (admin-only section) -->
+          <div class="card" style="margin-top: 20px">
+            <div class="card-title">النسخ الاحتياطي واستعادة النظام</div>
+            <p style="color: rgba(48, 56, 65, 0.6); margin-bottom: 16px">
+              نزّل نسخة كاملة من كل بيانات النظام (كل الأقسام في ملف واحد)، أو استرجعها لو حصل أي عطل في قاعدة البيانات.
+              يُنصح بتنزيل نسخة كل فترة.
+            </p>
+            <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center">
+              <button class="btn btn-primary" onclick="backupAllData()">⬇ تنزيل نسخة احتياطية كاملة</button>
+              <button class="btn btn-danger" onclick="triggerRestore()">⬆ استرجاع من نسخة احتياطية</button>
+              <input
+                type="file"
+                id="restore-file-input"
+                accept="application/json,.json"
+                style="display: none"
+                onchange="restoreAllData(this)"
+              />
+              <span id="backup-last" style="color: rgba(48, 56, 65, 0.5); font-size: 13px"></span>
+            </div>
+          </div>
 
- <footer class="app-footer">Developed by Abdelrahman Khaled</footer>
- </main>
-</div>
+          <!-- Feedback / Complaints -->
+          <div class="card" style="margin-top: 20px">
+            <div class="card-title">الشكاوى والملاحظات (Feedback)</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>الاسم (اختياري)</label>
+                <input type="text" id="feedback-name" placeholder="اسم صاحب الشكوى" />
+              </div>
+              <div class="form-group">
+                <label>الفرع</label>
+                <select id="feedback-branch">
+                  <option value="غير محدد">غير محدد</option>
+                  <option value="فرع المريوطيه">فرع المريوطيه</option>
+                  <option value="فرع الحدايق">فرع الحدايق</option>
+                  <option value="فرع الهرم">فرع الهرم</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>النوع</label>
+                <select id="feedback-type">
+                  <option>شكوى</option>
+                  <option>اقتراح</option>
+                  <option>ملاحظة</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group" style="margin-top: 14px">
+              <label>التفاصيل *</label>
+              <input type="text" id="feedback-text" placeholder="اكتب الشكوى أو الملاحظة" />
+            </div>
+            <div style="margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap">
+              <button class="btn btn-primary" onclick="addFeedback()">تسجيل</button>
+              <button class="btn btn-outline" onclick="printFeedback()">طباعة الشكاوى PDF</button>
+            </div>
+            <div class="table-container" style="margin-top: 18px">
+              <table>
+                <thead>
+                  <tr>
+                    <th>التاريخ</th>
+                    <th>النوع</th>
+                    <th>الاسم</th>
+                    <th>الفرع</th>
+                    <th>التفاصيل</th>
+                    <th>بواسطة</th>
+                    <th>إجراء</th>
+                  </tr>
+                </thead>
+                <tbody id="feedback-table">
+                  <tr>
+                    <td colspan="7" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 20px">
+                      لا توجد شكاوى مسجلة
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
-<!-- Firebase SDK served locally (vendor/) to avoid a hard CDN dependency.
- If a local file is missing, it falls back to the gstatic CDN automatically. -->
-<!-- Supabase SDK (replaces Firebase). Load order: Supabase -> data layer -> UI -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="server.supabase.js"></script>
-<script src="main.js"></script>
-</body>
+        <footer class="app-footer">Developed by Abdelrahman Khaled</footer>
+      </main>
+    </div>
+
+    <!-- Supabase SDK served locally (vendor/) so the app can open with no
+ internet (offline mode). If the local file is missing, fall back to the CDN. -->
+    <script src="vendor/supabase.min.js"></script>
+    <script>
+      if (!window.supabase)
+        document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');
+    </script>
+    <script src="server.supabase.js"></script>
+    <script src="main.js"></script>
+  </body>
 </html>

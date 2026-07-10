@@ -1,0 +1,23 @@
+name: Keep Supabase Alive
+
+# Pings the Supabase REST API on a schedule so the free-tier project never
+# pauses after ~7 days of inactivity. The anon key below is PUBLIC (it already
+# ships inside server.supabase.js), so it is safe to keep here.
+
+on:
+  schedule:
+    - cron: '0 6 */3 * *'   # every 3 days at 06:00 UTC
+  workflow_dispatch: {}        # also lets you run it manually from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST (keeps the database active)
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://yhzpbjijnrobdecekmgg.supabase.co/rest/v1/trainees?select=id&limit=1" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InloenBiamlqbnJvYmRlY2VrbWdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MjkwMDUsImV4cCI6MjA5ODMwNTAwNX0.N_j42fKjePPfCSvXgG1hoHaVZ62KtOyt5dX1PdFUe7w")
+          echo "Supabase responded with HTTP $code"
+          # 200 (even with an empty array under RLS) means the database was reached.
+          test "$code" = "200"
