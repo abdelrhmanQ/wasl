@@ -1832,6 +1832,6 @@ input[type='checkbox'] {
 /* Last-sync label + install button in the header. */
 .last-sync {
   font-size: 11px;
-  color: rgba(48, 56, 65, 0.5);
+  color: rgb(255, 234, 0);
   white-space: nowrap;
 }
