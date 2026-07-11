@@ -10,7 +10,7 @@
 // Supabase API calls are cross-origin, so they bypass this worker and
 // fail naturally offline — which is what triggers the outbox queueing.
 // ====================================================================
-const CACHE = 'wasl-app-v1';
+const CACHE = 'wasl-app-v2';
 const CORE = [
   './',
   'index.html',
@@ -18,6 +18,7 @@ const CORE = [
   'server.supabase.js',
   'style.css',
   'sports.html',
+  'manifest.json',
   'vendor/supabase.min.js',
   'vendor/qrcode.min.js',
   'src/logo-after.png',

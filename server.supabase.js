@@ -110,6 +110,7 @@ function applySection(name, gen, rows) {
   loadedSections[name] = true;
   // Queued offline writes for this section must survive the reload.
   applyOutboxLocally(name);
+  markSynced();
   return true;
 }
 
@@ -272,6 +273,7 @@ async function loadData() {
     await loadSection('attendance');
     // Anything still queued (e.g. flaky connection) stays visible in the UI.
     applyOutboxLocally();
+    markSynced();
     cacheLocally();
   } catch (err) {
     console.error('Supabase load error:', err);
@@ -574,6 +576,31 @@ function applyOutboxLocally(onlyKey) {
     }
   });
 }
+
+// ==================== LAST-SYNC INDICATOR ====================
+// Timestamp of the last successful read from the server, shown in the header
+// so staff can tell at a glance whether the data on screen is fresh.
+let lastSyncAt = 0;
+function markSynced() {
+  lastSyncAt = Date.now();
+  renderLastSync();
+}
+function renderLastSync() {
+  const el = document.getElementById('last-sync');
+  if (!el) return;
+  if (!lastSyncAt) {
+    el.textContent = '';
+    return;
+  }
+  const mins = Math.floor((Date.now() - lastSyncAt) / 60000);
+  let txt;
+  if (mins < 1) txt = 'الآن';
+  else if (mins < 60) txt = `منذ ${mins} دقيقة`;
+  else txt = new Date(lastSyncAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+  el.textContent = '🔄 آخر تحديث: ' + txt;
+}
+// Refresh the relative label every minute.
+setInterval(renderLastSync, 60000);
 
 // Header chip showing the offline/pending state. Hidden when all is well.
 function renderOutboxStatus(state) {

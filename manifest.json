@@ -1,0 +1,21 @@
+{
+  "name": "EL Wasl System",
+  "short_name": "الوصل",
+  "description": "نظام إدارة أكاديمية الوصل الرياضية — متعدد الفروع، يعمل أوفلاين",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1B2433",
+  "theme_color": "#1B2433",
+  "icons": [
+    {
+      "src": "src/logo-after.png",
+      "sizes": "489x510",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

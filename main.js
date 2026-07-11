@@ -2599,6 +2599,7 @@ function updateSalaries() {
  <button class="btn btn-success btn-sm" onclick="paySalary(${i})">صرف</button>
  <button class="btn btn-warning btn-sm" onclick="openStaffAdvance('${esc(e.id)}')">سلفة</button>
  <button class="btn btn-warning btn-sm" onclick="openStaffDeduction('${esc(e.id)}')">خصم</button>
+ <button class="btn btn-outline btn-sm" onclick="editEmployee('${esc(e.id)}')">تعديل</button>
  <button class="btn btn-danger btn-sm" onclick="deleteEmployee(${i})">حذف</button>
  </td>
  </tr>
@@ -2678,6 +2679,80 @@ function deleteEmployee(index) {
     dbDeleteDoc(employeesCol, emp.id);
     updateSalaries();
   }
+}
+
+// The standard (non-coach) employee roles offered in the add/edit forms.
+const EMPLOYEE_ROLES = ['موظف استقبال', 'اداري', 'عامل نظافة'];
+
+// Opens an edit modal for a non-coach employee (name, phone, role, salary,
+// branch, status). Coaches are edited from their own section (editCoach).
+function editEmployee(id) {
+  const e = data.employees.find(x => x.id === id);
+  if (!e) return;
+  // Build the role dropdown: the standard roles, plus the current custom role
+  // (if it isn't one of them) pre-selected, plus an "أخرى" free-text option.
+  const isStandard = EMPLOYEE_ROLES.includes(e.role);
+  const roleOptions =
+    EMPLOYEE_ROLES.map(r => `<option value="${esc(r)}" ${r === e.role ? 'selected' : ''}>${esc(r)}</option>`).join('') +
+    (!isStandard && e.role ? `<option value="${esc(e.role)}" selected>${esc(e.role)}</option>` : '') +
+    `<option value="__other__">أخرى (اكتب يدوياً)</option>`;
+  openModal(
+    `تعديل الموظف ${e.name}`,
+    `
+ <div class="form-grid">
+ <div class="form-group"><label>الاسم</label><input type="text" id="edit-emp-name" value="${esc(e.name)}"></div>
+ <div class="form-group"><label>رقم الهاتف</label><input type="tel" id="edit-emp-phone" value="${esc(e.phone || '')}" placeholder="01XXXXXXXXX"></div>
+ <div class="form-group"><label>الوظيفة</label>
+ <select id="edit-emp-role" onchange="toggleEditEmpRoleOther()">${roleOptions}</select>
+ <input type="text" id="edit-emp-role-other" placeholder="اكتب الوظيفة" style="display:none; margin-top:8px;">
+ </div>
+ <div class="form-group"><label>الراتب الشهري (ج.م)</label><input type="number" id="edit-emp-salary" value="${num(e.salary)}"></div>
+ <div class="form-group"><label>الفرع</label><select id="edit-emp-branch">${branchOptionsHTML(e.branch)}</select></div>
+ <div class="form-group"><label>الحالة</label>
+ <select id="edit-emp-status">
+ <option value="نشط" ${e.status !== 'موقوف' ? 'selected' : ''}>نشط</option>
+ <option value="موقوف" ${e.status === 'موقوف' ? 'selected' : ''}>موقوف</option>
+ </select>
+ </div>
+ </div>
+ <button class="btn btn-primary" style="margin-top:20px; width:100%;" onclick="saveEmployeeEdit('${esc(e.id)}')">حفظ التعديلات</button>
+ `,
+  );
+}
+
+// Reveals the free-text job field when "أخرى" is picked in the edit modal.
+function toggleEditEmpRoleOther() {
+  const other = document.getElementById('edit-emp-role-other');
+  if (other) other.style.display = val('edit-emp-role') === '__other__' ? 'block' : 'none';
+}
+
+function saveEmployeeEdit(id) {
+  const e = data.employees.find(x => x.id === id);
+  if (!e) return;
+  const name = val('edit-emp-name').trim();
+  if (!name) {
+    showNotification('اسم الموظف مطلوب', 'warning');
+    return;
+  }
+  let role = val('edit-emp-role');
+  if (role === '__other__') {
+    role = val('edit-emp-role-other').trim();
+    if (!role) {
+      showNotification('اكتب الوظيفة في الخانة', 'warning');
+      return;
+    }
+  }
+  e.name = name;
+  e.phone = val('edit-emp-phone').trim();
+  e.role = role;
+  e.salary = num(val('edit-emp-salary'));
+  e.branch = val('edit-emp-branch');
+  e.status = val('edit-emp-status');
+  dbSetDoc(employeesCol, e.id, e);
+  closeModal();
+  updateSalaries();
+  if (typeof renderStaffAttendance === 'function') renderStaffAttendance();
+  showNotification('تم حفظ بيانات الموظف');
 }
 
 // ==================== EDIT / DELETE FINANCIAL RECORDS ====================
@@ -7054,6 +7129,31 @@ document.addEventListener('DOMContentLoaded', () => {
     navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed:', err));
   }
 });
+
+// ==================== PWA INSTALL ====================
+// The browser fires beforeinstallprompt when the app is installable; we stash
+// the event and reveal our own "تثبيت التطبيق" button to trigger it on demand.
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const btn = document.getElementById('install-btn');
+  if (btn) btn.style.display = '';
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  const btn = document.getElementById('install-btn');
+  if (btn) btn.style.display = 'none';
+});
+function promptInstall() {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  deferredInstallPrompt.userChoice.finally(() => {
+    deferredInstallPrompt = null;
+    const btn = document.getElementById('install-btn');
+    if (btn) btn.style.display = 'none';
+  });
+}
 
 // Close modal on overlay click
 document.getElementById('modal-overlay').addEventListener('click', function (e) {
