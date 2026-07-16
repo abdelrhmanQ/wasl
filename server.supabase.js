@@ -238,7 +238,12 @@ async function recomputeStats() {
 }
 
 // ==================== LOAD ====================
+// Full-reload generation: if a NEWER loadData starts (e.g. the device branch
+// is switched while the first load is still in flight), the older load's
+// responses are discarded instead of overwriting the newer branch's data.
+let fullLoadGen = 0;
 async function loadData() {
+  const gen = ++fullLoadGen;
   // Upload any queued offline writes FIRST, so the reload below reads them
   // back from the server instead of overwriting them.
   try {
@@ -254,6 +259,7 @@ async function loadData() {
       fetchRows(groupsCol, branchSel),
       fetchRows(sessionsCol, branchSel),
     ]);
+    if (gen !== fullLoadGen) return; // superseded by a newer reload
     data.trainees = trainees.map(rowToRecord);
     data.employees = employees.map(rowToRecord);
     data.groups = groups.map(rowToRecord);
@@ -261,9 +267,11 @@ async function loadData() {
 
     // Counter (atomic value lives in meta).
     const { data: cRow } = await sb.from('meta').select('data').eq('id', 'counter').maybeSingle();
+    if (gen !== fullLoadGen) return;
     data.counter = cRow && cRow.data ? cRow.data.value : data.trainees.length + 1;
 
     await recomputeStats();
+    if (gen !== fullLoadGen) return;
 
     historyFullyLoaded = false;
     defaultHistoryLoaded = false;
@@ -276,6 +284,7 @@ async function loadData() {
     markSynced();
     cacheLocally();
   } catch (err) {
+    if (gen !== fullLoadGen) return; // a newer reload owns the data now
     console.error('Supabase load error:', err);
     const saved = localStorage.getItem('racer-data');
     if (saved) data = JSON.parse(saved);
@@ -491,10 +500,21 @@ async function sendOp(op) {
 // Replays the queue in order. Stops on the first network failure (still
 // offline — retried on the next 'online' event / timer). A non-network error
 // is retried up to 5 flushes, then dropped so it can't block the queue.
-let outboxFlushing = false;
-async function flushOutbox() {
-  if (outboxFlushing || outbox.length === 0) return;
-  outboxFlushing = true;
+// Concurrent callers share the SAME in-flight promise, so `await flushOutbox()`
+// really waits for the upload to finish (loadData depends on this).
+let flushPromise = null;
+function flushOutbox() {
+  if (flushPromise) return flushPromise;
+  if (outbox.length === 0) {
+    renderOutboxStatus();
+    return Promise.resolve();
+  }
+  flushPromise = doFlushOutbox().finally(() => {
+    flushPromise = null;
+  });
+  return flushPromise;
+}
+async function doFlushOutbox() {
   const had = outbox.length;
   renderOutboxStatus('sending');
   try {
@@ -531,7 +551,6 @@ async function flushOutbox() {
       }
     }
   } finally {
-    outboxFlushing = false;
     renderOutboxStatus();
     if (had > 0 && outbox.length === 0 && typeof showNotification === 'function') {
       showNotification('تم رفع كل العمليات المعلّقة بنجاح ✅');
@@ -649,7 +668,28 @@ function mustQueue() {
   return !navigator.onLine || outbox.length > 0;
 }
 
-async function dbSetDoc(table, id, obj) {
+// ---- Per-row write chains: two quick saves of the SAME record fire two HTTP
+// requests that can reach the server in REVERSE order, making the older state
+// win (e.g. registerTrainee saves the player, then saves again with add-ons —
+// the add-ons could be lost). Chaining runs each row's writes sequentially in
+// call order; different rows still write in parallel. ----
+const writeChains = {};
+function chainWrite(key, fn) {
+  const prev = writeChains[key] || Promise.resolve();
+  const run = prev.then(fn, fn); // run regardless of the previous write's fate
+  const tail = run.then(
+    () => {
+      if (writeChains[key] === tail) delete writeChains[key];
+    },
+    () => {
+      if (writeChains[key] === tail) delete writeChains[key];
+    },
+  );
+  writeChains[key] = tail;
+  return run;
+}
+
+function dbSetDoc(table, id, obj) {
   const isNew = obj && obj.ts == null;
   if (isNew) {
     obj.ts = Date.now();
@@ -663,23 +703,28 @@ async function dbSetDoc(table, id, obj) {
   if (isNew && table === paymentsCol && (typeof countsAsRevenue !== 'function' || countsAsRevenue(obj)))
     bumpStat('revenue', num(obj.amount), obj.branch);
   if (isNew && table === expensesCol) bumpStat('expenses', num(obj.amount), obj.branch);
-  if (mustQueue()) {
-    enqueueOp({ kind: 'upsert', table, rowId: String(id), obj: JSON.parse(JSON.stringify(obj)) });
-    flushOutbox();
-    return;
-  }
-  try {
-    const { error } = await sb.from(table).upsert(toRow(id, obj));
-    if (error) throw error;
-  } catch (err) {
-    if (isNetworkError(err)) {
-      enqueueOp({ kind: 'upsert', table, rowId: String(id), obj: JSON.parse(JSON.stringify(obj)) });
-      showNotification('لا يوجد اتصال — ستُرفع العملية تلقائياً عند عودة النت', 'warning');
+  // Snapshot NOW: the caller may keep mutating the object after this call —
+  // this write must carry the state as of this exact moment.
+  const snapshot = JSON.parse(JSON.stringify(obj));
+  return chainWrite(`${table}/${id}`, async () => {
+    if (mustQueue()) {
+      enqueueOp({ kind: 'upsert', table, rowId: String(id), obj: snapshot });
+      flushOutbox();
       return;
     }
-    console.error('Supabase set error:', err);
-    showNotification('تعذر الحفظ في قاعدة البيانات', 'danger');
-  }
+    try {
+      const { error } = await sb.from(table).upsert(toRow(id, snapshot));
+      if (error) throw error;
+    } catch (err) {
+      if (isNetworkError(err)) {
+        enqueueOp({ kind: 'upsert', table, rowId: String(id), obj: snapshot });
+        showNotification('لا يوجد اتصال — ستُرفع العملية تلقائياً عند عودة النت', 'warning');
+        return;
+      }
+      console.error('Supabase set error:', err);
+      showNotification('تعذر الحفظ في قاعدة البيانات', 'danger');
+    }
+  });
 }
 
 // Used for attendance (auto-generated id). trainee_id is extracted so a
@@ -717,30 +762,37 @@ async function dbAddDoc(table, obj) {
   }
 }
 
-async function dbDeleteDoc(table, id) {
+function dbDeleteDoc(table, id) {
   cacheLocally();
-  if (mustQueue()) {
-    enqueueOp({ kind: 'delete', table, rowId: String(id) });
-    flushOutbox();
-    return;
-  }
-  try {
-    // count:'exact' exposes silent RLS refusals: a delete the policy blocks
-    // returns no error but affects 0 rows — surface that instead of hiding it.
-    const { error, count } = await sb.from(table).delete({ count: 'exact' }).eq('id', String(id));
-    if (error) throw error;
-    if (count === 0) {
-      showNotification('لم يُحذف السجل من قاعدة البيانات — غالباً لا تملك صلاحية الحذف (سيعود بعد التحديث)', 'danger');
-    }
-  } catch (err) {
-    if (isNetworkError(err)) {
+  // Chained on the same per-row key as dbSetDoc, so an edit followed by a
+  // quick delete can never arrive reversed (which would resurrect the row).
+  return chainWrite(`${table}/${id}`, async () => {
+    if (mustQueue()) {
       enqueueOp({ kind: 'delete', table, rowId: String(id) });
-      showNotification('لا يوجد اتصال — سيُحذف من قاعدة البيانات عند عودة النت', 'warning');
+      flushOutbox();
       return;
     }
-    console.error('Supabase delete error:', err);
-    showNotification('تعذر الحذف من قاعدة البيانات السحابية', 'danger');
-  }
+    try {
+      // count:'exact' exposes silent RLS refusals: a delete the policy blocks
+      // returns no error but affects 0 rows — surface that instead of hiding it.
+      const { error, count } = await sb.from(table).delete({ count: 'exact' }).eq('id', String(id));
+      if (error) throw error;
+      if (count === 0) {
+        showNotification(
+          'لم يُحذف السجل من قاعدة البيانات — غالباً لا تملك صلاحية الحذف (سيعود بعد التحديث)',
+          'danger',
+        );
+      }
+    } catch (err) {
+      if (isNetworkError(err)) {
+        enqueueOp({ kind: 'delete', table, rowId: String(id) });
+        showNotification('لا يوجد اتصال — سيُحذف من قاعدة البيانات عند عودة النت', 'warning');
+        return;
+      }
+      console.error('Supabase delete error:', err);
+      showNotification('تعذر الحذف من قاعدة البيانات السحابية', 'danger');
+    }
+  });
 }
 
 // Delete every row where a field equals a value (used to remove a deleted

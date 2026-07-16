@@ -1742,22 +1742,6 @@ function renderRefunds() {
 const ACADEMY_PHONES = ['01150011836', '01021811713'];
 const ACADEMY_INSTAGRAM = 'alwasl.academy.eg';
 const ACADEMY_FACEBOOK = 'El Wasl Academy';
-// The BACK face of a card: the logo sits behind as a large faded backdrop, with
-// the academy name + slogan, then phones + social handles (no emojis).
-// Same dark theme as the front; used as a second page/slot for double-sided print.
-function cardBackInnerHTML(logoUrl) {
-  return `<img class="back-logo" src="${logoUrl}" alt="" onerror="this.style.display='none';">
- <div class="back-edges">
- <div class="edge edge-left">
- <div class="bc bc-phones">${ACADEMY_PHONES[0]}</div>
- <div class="bc">Facebook: ${esc(ACADEMY_FACEBOOK)}</div>
- </div>
- <div class="edge edge-right">
- <div class="bc bc-phones">${ACADEMY_PHONES[1]}</div>
- <div class="bc">Instagram: ${esc(ACADEMY_INSTAGRAM)}</div>
- </div>
- </div>`;
-}
 
 function printID() {
   const id = document.getElementById('generated-id').textContent;
@@ -1766,13 +1750,121 @@ function printID() {
   else openCardWindow({ id, name: '', codes: [id] });
 }
 
-// Opens a print window with ONE membership card per CARD CODE the player holds
-// (a multi-sport player has several). Each card shows its own code + QR, and is
-// coloured/labelled by the sport whose number block that code belongs to.
+// Academy contact icons (inline SVG so they print reliably — no emoji fonts).
+// All rendered WHITE to sit cleanly on the dark card.
+const WA_ICON =
+  '<svg width="11" height="11" viewBox="0 0 24 24" fill="#ffffff"><path d="M12 2a10 10 0 00-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1012 2zm0 2a8 8 0 11-4.2 14.8l-.3-.2-2.8.8.8-2.7-.2-.3A8 8 0 0112 4zm4.3 10.8c-.2-.1-1.3-.7-1.5-.8-.2-.1-.4-.1-.5.1l-.7.9c-.1.2-.3.2-.5.1a6.5 6.5 0 01-3.2-2.8c-.1-.2 0-.4.1-.5l.4-.5.2-.4v-.4l-.7-1.7c-.2-.4-.4-.4-.5-.4h-.5c-.2 0-.4.1-.6.3-.7.7-.9 1.6-.6 2.6.4 1.4 1.3 2.7 2.6 3.7 1.6 1.3 3 1.7 3.7 1.8.6.1 1.4 0 2-.5.4-.3.6-.8.6-1.2v-.5c0-.1-.1-.1-.3-.2z"/></svg>';
+const TEL_ICON =
+  '<svg width="11" height="11" viewBox="0 0 24 24" fill="#ffffff"><path d="M6.6 10.8a15 15 0 006.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 013 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1l-2.3 2.3z"/></svg>';
+const FB_ICON =
+  '<svg width="11" height="11" viewBox="0 0 24 24" fill="#ffffff"><path d="M22 12a10 10 0 10-11.6 9.9v-7H7.9V12h2.5V9.8c0-2.5 1.5-3.9 3.8-3.9 1.1 0 2.2.2 2.2.2v2.5h-1.2c-1.2 0-1.6.8-1.6 1.6V12h2.7l-.4 2.9h-2.3v7A10 10 0 0022 12z"/></svg>';
+const IG_ICON =
+  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="#ffffff" stroke="none"/></svg>';
+
+// Shared CSS for the new PORTRAIT membership card (front dark + back white with
+// a barcode). Used by the single-card window and the A4 batch sheet.
+const PORTRAIT_CARD_CSS = `
+ .card { position: relative; width: 30mm; height: 60mm; overflow: hidden; border-radius: 3mm; --gold: #D4AF37; --gold-lt: #F0D97A; color: #E9EDF3; }
+ .card.front { background: radial-gradient(18mm 24mm at 100% 12%, rgba(212,175,55,0.28), transparent 60%), radial-gradient(15mm 18mm at 0% 100%, rgba(212,175,55,0.12), transparent 62%), linear-gradient(150deg, #000 0%, #100D06 45%, #000 100%); display: flex; flex-direction: column; align-items: center; padding: 2.5mm 2mm 2mm; text-align: center; }
+ .logo { width: 11mm; height: auto; margin-top: 0.5mm; z-index: 1; }
+ .academy { font-family: Georgia, 'Times New Roman', serif; font-size: 8px; font-weight: 700; letter-spacing: 0.3px; margin-top: 1mm; z-index: 1; }
+ .academy .w { color: #fff; }
+ .academy .a { color: var(--gold-lt); }
+ .divider { height: 0.25mm; width: 86%; background: linear-gradient(90deg, transparent, var(--gold), transparent); margin: 1.5mm 0; z-index: 1; }
+ .rows { z-index: 1; margin-top: 1mm; display: flex; flex-direction: column; gap: 1mm; width: 100%; }
+ /* Label (Sport/Branch) on the LEFT, value on the RIGHT. */
+ .row { display: flex; direction: ltr; justify-content: space-between; align-items: baseline; gap: 1mm; padding: 0 1.5mm; font-size: 6px; }
+ .row .k { color: rgba(233,237,243,0.55); flex: none; }
+ .row .v { color: var(--gold-lt); font-weight: 700; text-align: right; }
+ .code { z-index: 1; margin-top: 2mm; font-family: 'Courier New', monospace; font-size: 9px; font-weight: 700; letter-spacing: 1px; color: #fff; background: rgba(212,175,55,0.12); border: 0.25mm solid rgba(212,175,55,0.5); border-radius: 1.5mm; padding: 1mm 2mm; }
+ /* Contacts split into the two bottom corners: phones one side, socials other. */
+ .contact { z-index: 1; margin-top: auto; width: 100%; display: flex; justify-content: space-between; align-items: flex-end; font-size: 4.6px; color: #E9EDF3; }
+ .contact .col { display: flex; flex-direction: column; gap: 0.8mm; }
+ .contact .col-right { align-items: flex-end; }
+ .contact .p { display: flex; align-items: center; gap: 0.8mm; }
+ .contact .p span { direction: ltr; }
+ .contact svg { width: 6px; height: 6px; }
+ /* Back: white — only the barcode (rotated along the length) + the code. */
+ .card.back { background: #fff; display: flex; align-items: center; justify-content: center; padding: 3mm; }
+ .bc-wrap { width: 15mm; height: 52mm; display: flex; align-items: center; justify-content: center; }
+ .bc-rot { transform: rotate(90deg); display: flex; flex-direction: column; align-items: center; gap: 1.5mm; white-space: nowrap; }
+ .card.back .barcode { width: 48mm; height: 11mm; }
+ .card.back .b-id { font-family: 'Courier New', monospace; font-size: 9px; font-weight: 700; letter-spacing: 1px; color: #111; }
+ `;
+
+// FRONT face of one membership card: logo, academy name, the sport (read from
+// the code) and branch in ENGLISH, the code, then the academy's contacts. No
+// player name. `extraStyle` lets the caller add a page break (single window).
+function cardFrontHTML(t, code, logoUrl, extraStyle) {
+  const sport = sportForCode(code) || traineeSports(t)[0] || '';
+  const sportTxt = sport ? sportEn(sport) : '';
+  const branchTxt = t.branch ? branchEn(t.branch) : '';
+  return `
+ <div class="card front" style="${extraStyle || ''}">
+ <img class="logo" src="${logoUrl}" alt="" onerror="this.style.display='none';">
+ <div class="academy"><span class="w">El Wasl</span> <span class="a">ACADEMY</span></div>
+ <div class="divider"></div>
+ <div class="rows">
+ ${sportTxt ? `<div class="row"><span class="k">Sport</span><span class="v">${esc(sportTxt)}</span></div>` : ''}
+ ${branchTxt ? `<div class="row"><span class="k">Branch</span><span class="v">${esc(branchTxt)}</span></div>` : ''}
+ </div>
+ <div class="code">${esc(code)}</div>
+ <div class="contact">
+ <div class="col col-left">
+ <div class="p">${WA_ICON}<span>${ACADEMY_PHONES[0]}</span></div>
+ <div class="p">${TEL_ICON}<span>${ACADEMY_PHONES[1]}</span></div>
+ </div>
+ <div class="col col-right">
+ <div class="p"><span>${esc(ACADEMY_FACEBOOK)}</span>${FB_ICON}</div>
+ <div class="p"><span>${esc(ACADEMY_INSTAGRAM)}</span>${IG_ICON}</div>
+ </div>
+ </div>
+ </div>`;
+}
+
+// BACK face: white — nothing but the barcode (rotated along the card's length)
+// and the code's serial number underneath it.
+function cardBackHTML(code, logoUrl, extraStyle) {
+  return `
+ <div class="card back" style="${extraStyle || ''}">
+ <div class="bc-wrap"><div class="bc-rot">
+ <svg class="barcode" data-code="${esc(code)}"></svg>
+ <div class="b-id">${esc(code)}</div>
+ </div></div>
+ </div>`;
+}
+
+// Front + back for ONE card (single-card window): each face on its own page.
+function portraitCardHTML(t, code, logoUrl) {
+  return (
+    cardFrontHTML(t, code, logoUrl, 'page-break-after: always;') +
+    cardBackHTML(code, logoUrl, 'page-break-after: always;')
+  );
+}
+
+// Small script that renders every <svg class="barcode"> from its data-code,
+// loading JsBarcode from the local vendor file first (offline), CDN as fallback.
+function barcodeRenderScript(printAfter) {
+  const doPrint = printAfter ? 'setTimeout(function(){ window.print(); }, 400);' : '';
+  return `
+ function renderBarcodes() {
+ if (window.JsBarcode) {
+ document.querySelectorAll('svg.barcode').forEach(function(el){
+ try { JsBarcode(el, el.getAttribute('data-code'), { format:'CODE128', width:2, height:55, displayValue:false, margin:0, background:'#ffffff', lineColor:'#000000' }); } catch(e){}
+ });
+ }
+ ${doPrint}
+ }
+ if (window.JsBarcode) { renderBarcodes(); }
+ else { var s=document.createElement('script'); s.src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"; s.onload=renderBarcodes; s.onerror=renderBarcodes; document.head.appendChild(s); }`;
+}
+
+// Opens a print window with the new portrait membership card per CARD CODE the
+// player holds (multi-sport players get one card per code). Front carries the
+// player data (name, sport from the code, branch); back is white with a barcode.
 function openCardWindow(t) {
   const logoUrl = new URL('src/logo-after.png', location.href).href;
-  const qrUrl = new URL('vendor/qrcode.min.js', location.href).href;
-  const name = t.name || '';
+  const bcUrl = new URL('vendor/jsbarcode.min.js', location.href).href;
   const codes = traineeCodes(t);
   const list = codes.length ? codes : [''];
   const win = window.open('', '_blank');
@@ -1780,96 +1872,20 @@ function openCardWindow(t) {
     showNotification('فعّل السماح بالنوافذ المنبثقة لطباعة البطاقة', 'warning');
     return;
   }
-
-  const cards = list
-    .map(code => {
-      const sport = sportForCode(code) || traineeSports(t)[0] || '';
-      const color = branchColor(t.branch);
-      const planText = planTextEn(sport, t.level);
-      return `
- <div class="card" style="--c:${color};">
- <div class="card-top">
- <div class="brand">
- <div class="club-name">El Wasl <span>Academy</span></div>
- <div class="club-sub">${planText ? esc(planText) : 'Membership Card'}</div>
- </div>
- <img class="brand-logo" src="${logoUrl}" alt="" onerror="this.style.display='none';">
- </div>
- <div class="divider"></div>
- <div class="card-body">
- <div class="card-info">
- <div class="member-name">${esc(name)}</div>
- ${planText ? `<div class="member-plan">${esc(planText)}</div>` : ''}
- <div class="member-code">${esc(code)}</div>
- </div>
- <div class="qr-box"><div class="qr" data-code="${esc(code)}"></div></div>
- </div>
- </div>
- <div class="card back" style="--c:${color};">${cardBackInnerHTML(logoUrl)}</div>`;
-    })
-    .join('');
-
+  const cards = list.map(code => portraitCardHTML(t, code, logoUrl)).join('');
   win.document.write(`
  <html dir="rtl" lang="ar"><head><title>بطاقة العضوية - ${esc(t.id)}</title>
- <meta charset="UTF-8"> <script src="${qrUrl}"><\/script>
+ <meta charset="UTF-8"> <script src="${bcUrl}"><\/script>
  <style>
- @page { size: 90mm 56mm; margin: 0; }
+ @page { size: 30mm 60mm; margin: 0; }
  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
  html, body { margin: 0; padding: 0; background: #ffffff; }
- /* One card per page, coloured by its sport via the --c variable. */
- .card {
- position: relative; width: 90mm; height: 56mm; overflow: hidden;
- background:
- radial-gradient(60mm 40mm at 88% 8%, color-mix(in srgb, var(--c) 38%, transparent), transparent 62%),
- radial-gradient(50mm 34mm at 8% 100%, color-mix(in srgb, var(--c) 22%, transparent), transparent 65%),
- linear-gradient(135deg, #000000 0%, #0A0A0A 55%, #000000 100%);
- border-radius: 8px; padding: 4.5mm 5mm;
- display: flex; flex-direction: column; justify-content: space-between; color: #E9EDF3;
- page-break-after: always;
- }
- /* card border (edges) removed */
- /* top colour strip removed */
- .card-top { display: flex; justify-content: space-between; align-items: center; z-index: 1; }
- .brand { line-height: 1.1; }
- .club-name { font-size: 15px; font-weight: 900; letter-spacing: 1px; color: #ffffff; }
- .club-name span { color: var(--c); }
- .club-sub { font-size: 8px; letter-spacing: 1px; color: var(--c); margin-top: 1.5mm; font-weight: 700; }
- .brand-logo { height: 12mm; width: auto; }
- .divider { height: 0.3mm; background: linear-gradient(90deg, transparent, var(--c), transparent); margin: 1mm 0; z-index: 1; }
- .card-body { display: flex; justify-content: space-between; align-items: center; gap: 4mm; z-index: 1; }
- .card-info { flex: 1; min-width: 0; }
- .lbl { font-size: 6.5px; letter-spacing: 1px; color: rgba(233,237,243,0.5); text-transform: uppercase; }
- .member-name { font-size: 15px; font-weight: 800; color: #ffffff; margin-bottom: 1.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
- .member-plan { font-size: 9px; color: var(--c); font-weight: 600; margin-bottom: 2mm; }
- .member-code { font-size: 13px; font-family: 'Courier New', monospace; letter-spacing: 1px; color: #E9EDF3; font-weight: 700; }
- .qr-box { background: #ffffff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm var(--c); }
- .card-footer { font-size: 6.5px; color: var(--c); text-align: center; letter-spacing: 0.5px; z-index: 1; }
- .card.back { justify-content: center; align-items: center; text-align: center; }
- .back-logo { position: absolute; width: 46mm; height: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.14; z-index: 0; }
- .back-edges { position: absolute; left: 5mm; right: 5mm; bottom: 4.5mm; display: flex; direction: ltr; justify-content: space-between; align-items: flex-end; z-index: 1; }
- .edge { display: flex; flex-direction: column; gap: 0.6mm; }
- .edge-left { align-items: flex-start; text-align: left; }
- .edge-right { align-items: flex-end; text-align: right; }
- .bc { font-size: 7.5px; color: #D6DBE2; letter-spacing: 0.2px; }
- .bc.bc-phones { color: var(--c); font-weight: 800; font-size: 9px; }
+ ${PORTRAIT_CARD_CSS}
  </style>
  </head>
  <body>
  ${cards}
- <script>
- window.onload = function() {
- function render() {
- if (window.QRCode) {
- document.querySelectorAll('.qr').forEach(function(el) {
- new QRCode(el, { text: el.getAttribute('data-code'), width: 96, height: 96, colorDark: "#1B2433", colorLight: "#ffffff" });
- });
- }
- setTimeout(function() { window.print(); }, 400);
- }
- if (window.QRCode) { render(); }
- else { var s = document.createElement('script'); s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload = render; s.onerror = render; document.head.appendChild(s); }
- };
- <\/script>
+ <script>window.onload = function(){ ${barcodeRenderScript(true)} };<\/script>
  </body></html>
  `);
   win.document.close();
@@ -1889,36 +1905,6 @@ const SHEET_BASE_CSS = `
  html, body { background:#fff; }
  .sheet { display:flex; flex-wrap:wrap; gap:4mm; align-content:flex-start; }
  .slot { width:90mm; height:56mm; break-inside:avoid; outline:0.2mm dashed #b0b0b0; }
- `;
-
-// Player card look (same as the single window, minus the per-card page break).
-const TRAINEE_CARD_CSS = `
- .card { position: relative; width: 90mm; height: 56mm; overflow: hidden; background: radial-gradient(60mm 40mm at 88% 8%, color-mix(in srgb, var(--c) 38%, transparent), transparent 62%), radial-gradient(50mm 34mm at 8% 100%, color-mix(in srgb, var(--c) 22%, transparent), transparent 65%), linear-gradient(135deg, #000000 0%, #0A0A0A 55%, #000000 100%); border-radius: 8px; padding: 4.5mm 5mm; display: flex; flex-direction: column; justify-content: space-between; color: #E9EDF3; }
- /* card border (edges) removed */
- /* top colour strip removed */
- .card-top { display: flex; justify-content: space-between; align-items: center; z-index: 1; }
- .brand { line-height: 1.1; }
- .club-name { font-size: 15px; font-weight: 900; letter-spacing: 1px; color: #ffffff; }
- .club-name span { color: var(--c); }
- .club-sub { font-size: 8px; letter-spacing: 1px; color: var(--c); margin-top: 1.5mm; font-weight: 700; }
- .brand-logo { height: 12mm; width: auto; }
- .divider { height: 0.3mm; background: linear-gradient(90deg, transparent, var(--c), transparent); margin: 1mm 0; z-index: 1; }
- .card-body { display: flex; justify-content: space-between; align-items: center; gap: 4mm; z-index: 1; }
- .card-info { flex: 1; min-width: 0; }
- .lbl { font-size: 6.5px; letter-spacing: 1px; color: rgba(233,237,243,0.5); text-transform: uppercase; }
- .member-name { font-size: 15px; font-weight: 800; color: #ffffff; margin-bottom: 1.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
- .member-plan { font-size: 9px; color: var(--c); font-weight: 600; margin-bottom: 2mm; }
- .member-code { font-size: 13px; font-family: 'Courier New', monospace; letter-spacing: 1px; color: #E9EDF3; font-weight: 700; }
- .qr-box { background: #ffffff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm var(--c); }
- .card-footer { font-size: 6.5px; color: var(--c); text-align: center; letter-spacing: 0.5px; z-index: 1; }
- .card.back { justify-content: center; align-items: center; text-align: center; }
- .back-logo { position: absolute; width: 46mm; height: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.14; z-index: 0; }
- .back-edges { position: absolute; left: 5mm; right: 5mm; bottom: 4.5mm; display: flex; direction: ltr; justify-content: space-between; align-items: flex-end; z-index: 1; }
- .edge { display: flex; flex-direction: column; gap: 0.6mm; }
- .edge-left { align-items: flex-start; text-align: left; }
- .edge-right { align-items: flex-end; text-align: right; }
- .bc { font-size: 7.5px; color: #D6DBE2; letter-spacing: 0.2px; }
- .bc.bc-phones { color: var(--c); font-weight: 800; font-size: 9px; }
  `;
 
 // Staff card look (deep-gold accent), colours inlined (constant per staff card).
@@ -1941,23 +1927,6 @@ const STAFF_CARD_CSS = `
  .s-qr { background: #fff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm #C9A227; }
  .s-footer { font-size: 6.5px; color: #C9A227; text-align: center; letter-spacing: 0.5px; z-index: 1; }
  `;
-
-// One player card (a single code) as an A4-sheet slot.
-function traineeCardSlot(t, code, logoUrl) {
-  const sport = sportForCode(code) || traineeSports(t)[0] || '';
-  const color = branchColor(t.branch);
-  const planText = planTextEn(sport, t.level);
-  return `<div class="slot"><div class="card" style="--c:${color};">
- <div class="card-top"><div class="brand"><div class="club-name">El Wasl <span>Academy</span></div><div class="club-sub">${planText ? esc(planText) : 'Membership Card'}</div></div><img class="brand-logo" src="${logoUrl}" alt="" onerror="this.style.display='none';"></div>
- <div class="divider"></div>
- <div class="card-body"><div class="card-info"><div class="member-name">${esc(t.name || '')}</div>${planText ? `<div class="member-plan">${esc(planText)}</div>` : ''}<div class="member-code">${esc(code)}</div></div><div class="qr-box"><div class="qr" data-code="${esc(code)}"></div></div></div>
- </div></div>`;
-}
-
-// The back face as an A4-sheet slot (academy contact info, branch-coloured).
-function cardBackSlot(color, logoUrl) {
-  return `<div class="slot"><div class="card back" style="--c:${color};">${cardBackInnerHTML(logoUrl)}</div></div>`;
-}
 
 // One staff card as an A4-sheet slot.
 function staffCardSlot(e, logoUrl) {
@@ -1997,7 +1966,37 @@ function openCardsSheet(title, cardCss, slotsHtml) {
   win.document.close();
 }
 
+// A4 sheet shell for the PORTRAIT keychain tags: 30x60mm slots with cut guides,
+// and a barcode renderer (front slots have no barcode; back slots do).
+const SHEET_PORTRAIT_BASE_CSS = `
+ @page { size: A4; margin: 8mm; }
+ * { box-sizing: border-box; margin:0; padding:0; font-family:'Segoe UI',Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+ html, body { background:#fff; }
+ .sheet { display:flex; flex-wrap:wrap; gap:4mm; align-content:flex-start; }
+ .slot { width:30mm; height:60mm; break-inside:avoid; border-radius:3mm; overflow:hidden; outline:0.2mm dashed #b0b0b0; }
+ .slot .card { border-radius:5mm; }
+ `;
+
+// Opens an A4 print window arranging the portrait card faces, loads JsBarcode,
+// renders every back-face barcode, then prints. Offline-safe (local vendor lib).
+function openPortraitCardsSheet(title, slotsHtml) {
+  const bcUrl = new URL('vendor/jsbarcode.min.js', location.href).href;
+  const win = window.open('', '_blank');
+  if (!win) {
+    showNotification('فعّل السماح بالنوافذ المنبثقة للطباعة', 'warning');
+    return;
+  }
+  win.document.write(`
+ <html dir="rtl" lang="ar"><head><title>${esc(title)}</title><meta charset="UTF-8"> <script src="${bcUrl}"><\/script>
+ <style>${SHEET_PORTRAIT_BASE_CSS}${PORTRAIT_CARD_CSS}</style></head>
+ <body><div class="sheet">${slotsHtml}</div>
+ <script>window.onload = function(){ ${barcodeRenderScript(true)} };<\/script>
+ </body></html>`);
+  win.document.close();
+}
+
 // Print every active player's card(s) on A4 sheets (optionally one branch).
+// Each code produces a front slot + a back slot (barcode), in the new design.
 function printTraineeCardsSheet(branch) {
   const logoUrl = new URL('src/logo-after.png', location.href).href;
   const list = data.trainees.filter(t => t.type === 'subscription' && (!branch || (t.branch || '') === branch));
@@ -2005,8 +2004,8 @@ function printTraineeCardsSheet(branch) {
   list.forEach(t =>
     traineeCodes(t).forEach(code => {
       if (code) {
-        slots.push(traineeCardSlot(t, code, logoUrl));
-        slots.push(cardBackSlot(branchColor(t.branch), logoUrl));
+        slots.push(`<div class="slot">${cardFrontHTML(t, code, logoUrl, '')}</div>`);
+        slots.push(`<div class="slot">${cardBackHTML(code, logoUrl, '')}</div>`);
       }
     }),
   );
@@ -2014,7 +2013,7 @@ function printTraineeCardsSheet(branch) {
     showNotification('لا توجد كروت لاعبين للطباعة', 'warning');
     return;
   }
-  openCardsSheet('كروت اللاعبين', TRAINEE_CARD_CSS, slots.join(''));
+  openPortraitCardsSheet('كروت اللاعبين', slots.join(''));
 }
 
 // Print every staff member's card on A4 sheets (optionally one branch).
@@ -5414,108 +5413,17 @@ function printBlankCards() {
     return;
   }
   const logoUrl = new URL('src/logo-after.png', location.href).href;
-  const color = branchColor(branch);
-  // Group text for the print window's title only (sport + gym sector).
+  // A pseudo-trainee carries just the branch; the sport is read from each
+  // structured code by cardFrontHTML (via sportForCode), so blank cards use the
+  // exact same new portrait design (front data + white barcode back) as players.
+  const pseudo = { branch };
+  const slots = [];
+  codes.forEach(code => {
+    slots.push(`<div class="slot">${cardFrontHTML(pseudo, code, logoUrl, '')}</div>`);
+    slots.push(`<div class="slot">${cardBackHTML(code, logoUrl, '')}</div>`);
+  });
   const groupText = isGymSport(sport) ? `${sport} • ${sector}` : sport;
-
-  const back = `<div class="card back">${cardBackInnerHTML(logoUrl)}</div>`;
-  const cardEls = codes.map(
-    code =>
-      `
- <div class="card">
- <div class="card-top">
- <div class="brand">
- <div class="club-name">El Wasl <span>Academy</span></div>
- <div class="club-sub">${esc(sportEn(sport))}</div>
- </div>
- <img class="brand-logo" src="${logoUrl}" alt="" onerror="this.style.display='none'">
- </div>
- <div class="divider"></div>
- <div class="card-body">
- <div class="card-info">
- <div class="member-plan">${esc(branchEn(branch))}</div>
- <div class="member-code">${esc(code)}</div>
- </div>
- <div class="qr-box"><div class="qr" data-code="${esc(code)}"></div></div>
- </div>
- </div>` + back,
-  );
-
-  // 8 cards per A4 page (2 columns × 4 rows), page break after each eight.
-  let pages = '';
-  for (let i = 0; i < cardEls.length; i += 8) {
-    pages += `<div class="print-page">${cardEls.slice(i, i + 8).join('')}</div>`;
-  }
-
-  const qrUrl = new URL('vendor/qrcode.min.js', location.href).href;
-  const win = window.open('', '_blank');
-  if (!win) {
-    showNotification('فعّل السماح بالنوافذ المنبثقة لطباعة الكروت', 'warning');
-    return;
-  }
-  win.document.write(`
- <html dir="rtl" lang="ar"><head><title>كروت ${esc(sport)} - ${esc(groupText)} - ${esc(branch)} (${qty})</title>
- <meta charset="UTF-8"> <script src="${qrUrl}"><\/script>
- <style>
- @page { size: A4; margin: 8mm; }
- * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
- body { background: #ffffff; }
- /* 8 cards per page: a 2×4 grid, with a page break after each page. */
- .print-page { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; align-content: start; page-break-after: always; }
- .print-page:last-child { page-break-after: auto; }
- .card {
- position: relative; width: 90mm; height: 56mm; overflow: hidden;
- background:
- radial-gradient(60mm 40mm at 88% 8%, ${color}61, transparent 62%),
- radial-gradient(50mm 34mm at 8% 100%, ${color}38, transparent 65%),
- linear-gradient(135deg, #000000 0%, #0A0A0A 55%, #000000 100%);
- border-radius: 8px; padding: 4.5mm 5mm;
- display: flex; flex-direction: column; justify-content: space-between; color: #E9EDF3;
- }
- /* card border (edges) removed */
- /* top colour strip removed */
- .card-top { display: flex; justify-content: space-between; align-items: center; z-index: 1; }
- .club-name { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 1px; }
- .club-name span { color: ${color}; }
- .club-sub { font-size: 8px; letter-spacing: 1px; color: ${color}; margin-top: 1.5mm; font-weight: 700; }
- .brand-logo { height: 12mm; width: auto; }
- .divider { height: 0.3mm; background: linear-gradient(90deg, transparent, ${color}, transparent); margin: 1mm 0; }
- .card-body { display: flex; justify-content: space-between; align-items: center; gap: 4mm; z-index: 1; }
- .card-info { flex: 1; min-width: 0; }
- .lbl { font-size: 7px; letter-spacing: 1px; color: rgba(233,237,243,0.5); text-transform: uppercase; }
- .member-plan { font-size: 11px; color: ${color}; font-weight: 700; margin: 0.5mm 0 1.5mm; }
- .member-code { font-size: 18px; font-family: 'Courier New', monospace; letter-spacing: 2px; color: ${color}; font-weight: 800; margin-top: 1mm; }
- .qr-box { background: #ffffff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm ${color}; }
- .card-footer { font-size: 6.5px; color: ${color}; text-align: center; z-index: 1; }
- .card.back { justify-content: center; align-items: center; text-align: center; }
- .back-logo { position: absolute; width: 46mm; height: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.14; z-index: 0; }
- .back-edges { position: absolute; left: 5mm; right: 5mm; bottom: 4.5mm; display: flex; direction: ltr; justify-content: space-between; align-items: flex-end; z-index: 1; }
- .edge { display: flex; flex-direction: column; gap: 0.6mm; }
- .edge-left { align-items: flex-start; text-align: left; }
- .edge-right { align-items: flex-end; text-align: right; }
- .bc { font-size: 7.5px; color: #D6DBE2; letter-spacing: 0.2px; }
- .bc.bc-phones { color: ${color}; font-weight: 800; font-size: 9px; }
- </style>
- </head>
- <body>
- ${pages}
- <script>
- window.onload = function() {
- function render() {
- if (window.QRCode) {
- document.querySelectorAll('.qr').forEach(function(el) {
- new QRCode(el, { text: el.getAttribute('data-code'), width: 64, height: 64, colorDark: '#1B2433', colorLight: '#ffffff' });
- });
- }
- setTimeout(function() { window.print(); }, 500);
- }
- if (window.QRCode) { render(); }
- else { var s = document.createElement('script'); s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload = render; s.onerror = render; document.head.appendChild(s); }
- };
- <\/script>
- </body></html>
- `);
-  win.document.close();
+  openPortraitCardsSheet(`كروت ${groupText} - ${branch} (${qty})`, slots.join(''));
 }
 
 // Normalize any stored date (Arabic or ISO) to a "YYYY-MM-DD" key, so a
