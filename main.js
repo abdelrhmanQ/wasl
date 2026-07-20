@@ -58,7 +58,10 @@ function showSection(name) {
     ensureSection('payments', renderExtraIncome);
   }
   if (name === 'salaries') ensureSection('expenses', updateSalaries);
-  if (name === 'attendance') updateAttendanceLog();
+  if (name === 'attendance') {
+    populateAttendancePlayerList();
+    updateAttendanceLog();
+  }
   if (name === 'sessions') renderSessionsSection();
   if (name === 'groups') renderGroups();
   if (name === 'coaches') renderCoachesSection();
@@ -101,18 +104,56 @@ async function generateID() {
 
 // Case-insensitive trainee lookup by code. A player can have several cards
 // (one per sport), so we match the primary id OR any code in their `codes`
-// list. Old records with only an `id` still work.
+// list. Old records with only an `id` still work. `legacyCodes` holds cards
+// that were replaced by the structured-code migration — kept scannable so no
+// previously-printed card ever stops working, even though it isn't reprinted.
 function findTraineeByCode(code) {
   const c = (code || '').trim().toLowerCase();
   if (!c) return undefined;
   return data.trainees.find(
-    t => (t.id || '').toLowerCase() === c || (t.codes || []).some(x => (x || '').toLowerCase() === c),
+    t =>
+      (t.id || '').toLowerCase() === c ||
+      (t.codes || []).some(x => (x || '').toLowerCase() === c) ||
+      (t.legacyCodes || []).some(x => (x || '').toLowerCase() === c),
   );
+}
+
+// Resolves an attendance/lookup input to a single trainee. Accepts (in order):
+// a raw card code (what a barcode scanner types), the "name — code" value picked
+// from a datalist, or an exact, unambiguous player name. Returns undefined when
+// nothing matches or a bare name is ambiguous, so callers can show "not found"
+// without recording. Mirrors resolveExtraPlayer's matching so name lookup is
+// consistent across the app.
+function findTraineeByNameOrCode(raw) {
+  const s = (raw || '').trim();
+  if (!s) return undefined;
+  // Datalist "name — code": trust the code half.
+  if (s.includes(' — ')) {
+    const t = findTraineeByCode(s.split(' — ').pop().trim());
+    if (t) return t;
+  }
+  // Bare card code (also what a barcode scanner emits).
+  const byCode = findTraineeByCode(s);
+  if (byCode) return byCode;
+  // Exact, single-match name.
+  const nm = s.toLowerCase();
+  const byName = data.trainees.filter(t => (t.name || '').trim().toLowerCase() === nm);
+  return byName.length === 1 ? byName[0] : undefined;
 }
 
 // All card codes for a player (multi-card aware, backward compatible).
 function traineeCodes(t) {
   return t.codes && t.codes.length ? t.codes : [t.id].filter(Boolean);
+}
+
+// ---- Row-reference resolvers: table buttons pass the record's ID (stable
+// across re-renders). A stale numeric index could act on the WRONG row if the
+// table re-rendered between paint and click; legacy numeric refs still work. ----
+function traineeByRef(ref) {
+  return typeof ref === 'number' ? data.trainees[ref] : data.trainees.find(t => t.id === ref);
+}
+function employeeByRef(ref) {
+  return typeof ref === 'number' ? data.employees[ref] : data.employees.find(e => e.id === ref);
 }
 
 // <option> list of all coaches, used for assigning/reassigning a trainee's
@@ -746,7 +787,9 @@ function expiryCell(t) {
 // Single row renderer used by both the full list and the filtered views,
 // so the columns/actions always stay consistent.
 function traineeRowHtml(t) {
-  const i = data.trainees.indexOf(t);
+  // Buttons reference the row by ID — stable even if the table re-renders
+  // between paint and click (a stale index could hit the wrong player).
+  const ref = `'${esc(t.id)}'`;
   const info = subInfo(t);
   const renewBtn =
     info.expired || info.near
@@ -756,8 +799,8 @@ function traineeRowHtml(t) {
   const freezeBtn =
     t.type === 'subscription'
       ? t.frozen
-        ? `<button class="btn btn-success btn-sm" onclick="unfreezeTrainee(${i})">إلغاء التجميد</button>`
-        : `<button class="btn btn-outline btn-sm" onclick="freezeTrainee(${i})">تجميد</button>`
+        ? `<button class="btn btn-success btn-sm" onclick="unfreezeTrainee(${ref})">إلغاء التجميد</button>`
+        : `<button class="btn btn-outline btn-sm" onclick="freezeTrainee(${ref})">تجميد</button>`
       : '';
   const statusClass =
     t.status === 'نشط'
@@ -771,14 +814,14 @@ function traineeRowHtml(t) {
   const remaining = Math.max(0, num(t.subTotal) - num(t.subPaid));
   const installBtn =
     t.type === 'subscription' && remaining > 0
-      ? `<button class="btn btn-warning btn-sm" onclick="payInstallment(${i})">دفع قسط (متبقي ${remaining.toLocaleString()})</button>`
+      ? `<button class="btn btn-warning btn-sm" onclick="payInstallment(${ref})">دفع قسط (متبقي ${remaining.toLocaleString()})</button>`
       : '';
   // Refund/cancel request (subscriptions only). Disabled while one is pending.
   const refundBtn =
     t.type === 'subscription'
       ? t.refundRequest && t.refundRequest.status === 'معلّق'
         ? `<button class="btn btn-outline btn-sm" disabled>استرداد معلّق</button>`
-        : `<button class="btn btn-outline btn-sm" onclick="requestRefund(${i})">استرداد</button>`
+        : `<button class="btn btn-outline btn-sm" onclick="requestRefund(${ref})">استرداد</button>`
       : '';
   return `
  <tr>
@@ -802,10 +845,10 @@ function traineeRowHtml(t) {
  ${renewBtn}
  ${freezeBtn}
  ${refundBtn}
- <button class="btn btn-outline btn-sm" onclick="viewTrainee(${i})">عرض</button>
- <button class="btn btn-outline btn-sm" onclick="editTrainee(${i})">تعديل</button>
- <button class="btn btn-outline btn-sm" onclick="printCard(${i})">طباعة</button>
- <button class="btn btn-danger btn-sm" onclick="deleteTrainee(${i})">حذف</button>
+ <button class="btn btn-outline btn-sm" onclick="viewTrainee(${ref})">عرض</button>
+ <button class="btn btn-outline btn-sm" onclick="editTrainee(${ref})">تعديل</button>
+ <button class="btn btn-outline btn-sm" onclick="printCard(${ref})">طباعة</button>
+ <button class="btn btn-danger btn-sm" onclick="deleteTrainee(${ref})">حذف</button>
  </td>
  </tr>`;
 }
@@ -901,7 +944,8 @@ function resetTraineeFilters() {
 }
 
 function viewTrainee(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
+  if (!t) return;
   const attendanceCount = data.attendance.filter(a => a.id === t.id).length;
 
   openModal(
@@ -980,15 +1024,16 @@ function viewTrainee(index) {
      : ''
  }
  <div style="margin-top: 15px; display: flex; gap: 10px;">
- <button class="btn btn-outline btn-sm" onclick="closeModal(); editTrainee(${index})">تعديل البيانات</button>
- <button class="btn btn-outline btn-sm" onclick="printCard(${index})">طباعة البطاقة</button>
+ <button class="btn btn-outline btn-sm" onclick="closeModal(); editTrainee('${esc(t.id)}')">تعديل البيانات</button>
+ <button class="btn btn-outline btn-sm" onclick="printCard('${esc(t.id)}')">طباعة البطاقة</button>
  </div>
  `,
   );
 }
 
 function editTrainee(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
+  if (!t) return;
   editSports = traineeSports(t).slice(); // seed the multi-sport chips
   openModal(
     `تعديل بيانات ${t.name}`,
@@ -1083,14 +1128,15 @@ function editTrainee(index) {
  }).join('')}
  </div>
  </div>
- <button class="btn btn-primary" style="margin-top: 20px; width: 100%;" onclick="saveTraineeEdit(${index})">حفظ التعديلات</button>
+ <button class="btn btn-primary" style="margin-top: 20px; width: 100%;" onclick="saveTraineeEdit('${esc(t.id)}')">حفظ التعديلات</button>
  `,
   );
   renderEditSportsChips();
 }
 
 function saveTraineeEdit(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
+  if (!t) return;
   const oldCoach = t.trainer; // capture before the edit so we can detect a coach transfer
   t.name = document.getElementById('edit-name').value.trim() || t.name;
   t.phone = document.getElementById('edit-phone').value.trim() || t.phone;
@@ -1147,15 +1193,18 @@ function saveTraineeEdit(index) {
 }
 
 function printCard(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
+  if (!t) return;
   openCardWindow(t);
 }
 function deleteTrainee(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
+  if (!t) return;
   if (
     confirm(`هل أنت متأكد من حذف "${t.name}"؟\nسيتم حذف سجلات حضوره أيضاً، مع الاحتفاظ بمدفوعاته في التقارير المالية.`)
   ) {
-    data.trainees.splice(index, 1);
+    // Remove by OBJECT position (never a possibly-stale numeric index).
+    data.trainees.splice(data.trainees.indexOf(t), 1);
     dbDeleteDoc(traineesCol, t.id);
 
     // Clean up attendance records (local + cloud). Payments are intentionally
@@ -1252,18 +1301,18 @@ function renderTrials() {
   }
   tbody.innerHTML = trials
     .map(t => {
-      const i = data.trainees.indexOf(t);
+      const ref = `'${esc(t.id)}'`;
       const statusBadge =
         t.trialStatus === 'rejected'
           ? '<span class="badge badge-danger">مرفوض (يُحذف بعد أسبوع)</span>'
           : '<span class="badge badge-test">معلّق</span>';
       const actions =
         t.trialStatus === 'rejected'
-          ? `<button class="btn btn-outline btn-sm" onclick="viewTrainee(${i})">عرض</button>
- <button class="btn btn-danger btn-sm" onclick="deleteTrainee(${i})">حذف</button>`
-          : `<button class="btn btn-success btn-sm" onclick="acceptTrial(${i})">قبول</button>
- <button class="btn btn-danger btn-sm" onclick="rejectTrial(${i})">رفض</button>
- <button class="btn btn-outline btn-sm" onclick="viewTrainee(${i})">عرض</button>`;
+          ? `<button class="btn btn-outline btn-sm" onclick="viewTrainee(${ref})">عرض</button>
+ <button class="btn btn-danger btn-sm" onclick="deleteTrainee(${ref})">حذف</button>`
+          : `<button class="btn btn-success btn-sm" onclick="acceptTrial(${ref})">قبول</button>
+ <button class="btn btn-danger btn-sm" onclick="rejectTrial(${ref})">رفض</button>
+ <button class="btn btn-outline btn-sm" onclick="viewTrainee(${ref})">عرض</button>`;
       return `<tr>
  <td><code style="color:var(--gold); font-family:monospace;">${esc(t.id)}</code></td>
  <td><strong>${esc(t.name)}</strong></td>
@@ -1280,7 +1329,8 @@ function renderTrials() {
 
 // Accept: open a popup to enter the subscription details before converting.
 function acceptTrial(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
+  if (!t) return;
   if (!t || t.type !== 'test') return;
   openModal(
     `قبول وتحويل لاشتراك - ${t.name}`,
@@ -1324,7 +1374,7 @@ function acceptTrial(index) {
  <input type="text" id="accept-code" placeholder="كود الكرت المطبوع">
  </div>
  </div>
- <button class="btn btn-success" style="margin-top:18px; width:100%;" onclick="confirmAcceptTrial(${index})">تأكيد القبول والتحويل</button>`,
+ <button class="btn btn-success" style="margin-top:18px; width:100%;" onclick="confirmAcceptTrial('${esc(t.id)}')">تأكيد القبول والتحويل</button>`,
   );
 }
 function toggleAcceptLevel() {
@@ -1350,7 +1400,8 @@ function autofillAcceptSessions() {
 }
 
 function confirmAcceptTrial(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
+  if (!t) return;
   if (!t || t.type !== 'test') return;
   const sport = val('accept-sport');
   if (!sport) {
@@ -1418,7 +1469,8 @@ function confirmAcceptTrial(index) {
 }
 
 function rejectTrial(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
+  if (!t) return;
   if (!t || t.type !== 'test') return;
   if (!confirm(`رفض اللاعب التجريبي "${t.name}"؟ سيُحذف تلقائيًا بعد أسبوع.`)) return;
   t.trialStatus = 'rejected';
@@ -1432,7 +1484,8 @@ function rejectTrial(index) {
 // ==================== FREEZE / PAUSE SUBSCRIPTION ====================
 // Opens a popup to capture the freeze reason, then pauses the subscription.
 function freezeTrainee(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
+  if (!t) return;
   if (!t || t.frozen) return;
   openModal(
     `تجميد اشتراك - ${t.name}`,
@@ -1443,14 +1496,14 @@ function freezeTrainee(index) {
  <input type="text" id="freeze-reason" placeholder="مثال: سفر / إصابة / ظرف طارئ">
  </div>
  <div style="display:flex; gap:10px; margin-top:18px;">
- <button class="btn btn-primary" style="flex:1;" onclick="confirmFreeze(${index})">تأكيد التجميد</button>
+ <button class="btn btn-primary" style="flex:1;" onclick="confirmFreeze('${esc(t.id)}')">تأكيد التجميد</button>
  <button class="btn btn-outline" style="flex:1;" onclick="closeModal()">إلغاء</button>
  </div>`,
   );
 }
 
 function confirmFreeze(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
   if (!t) return;
   const reason = document.getElementById('freeze-reason').value.trim();
   if (!reason) {
@@ -1476,7 +1529,8 @@ function confirmFreeze(index) {
 }
 
 function unfreezeTrainee(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
+  if (!t) return;
   if (!t || !t.frozen) return;
   if (!confirm(`إلغاء تجميد اشتراك "${t.name}" واستئنافه؟`)) return;
 
@@ -1502,7 +1556,7 @@ function unfreezeTrainee(index) {
 
 // ==================== INSTALLMENTS ====================
 function payInstallment(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
   if (!t) return;
   const remaining = Math.max(0, num(t.subTotal) - num(t.subPaid));
   openModal(
@@ -1516,20 +1570,32 @@ function payInstallment(index) {
  <div class="form-group"><label>مبلغ القسط</label><input type="number" id="install-amount" value="${remaining}"></div>
  <div class="form-group"><label>طريقة الدفع</label><select id="install-method">${methodOptionsHTML('')}</select></div>
  <div style="display:flex; gap:10px; margin-top:18px;">
- <button class="btn btn-success" style="flex:1;" onclick="confirmInstallment(${index})">تأكيد الدفع</button>
+ <button class="btn btn-success" style="flex:1;" onclick="confirmInstallment('${esc(t.id)}')">تأكيد الدفع</button>
  <button class="btn btn-outline" style="flex:1;" onclick="closeModal()">إلغاء</button>
  </div>`,
   );
 }
 
 function confirmInstallment(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
   if (!t) return;
-  const amount = num(document.getElementById('install-amount').value);
+  const entered = num(document.getElementById('install-amount').value);
   const method = document.getElementById('install-method').value;
-  if (amount <= 0) {
+  if (entered <= 0) {
     showNotification('أدخل مبلغاً صالحاً', 'warning');
     return;
+  }
+  // Never accept more than what's still owed: an over-payment would push subPaid
+  // past subTotal and inflate the recorded revenue. Cap at the remaining balance
+  // and tell the user what was actually registered.
+  const due = Math.max(0, num(t.subTotal) - num(t.subPaid));
+  if (due <= 0) {
+    showNotification('لا يوجد مبلغ متبقٍّ على هذا اللاعب', 'warning');
+    return;
+  }
+  const amount = Math.min(entered, due);
+  if (entered > due) {
+    showNotification(`المتبقي ${due.toLocaleString()} ج.م فقط — تم تسجيل ${amount.toLocaleString()} ج.م`, 'warning');
   }
 
   t.subPaid = num(t.subPaid) + amount;
@@ -1588,7 +1654,7 @@ function refundEstimate(t) {
 }
 
 function requestRefund(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
   if (!t) return;
   if (t.refundRequest && t.refundRequest.status === 'معلّق') {
     showNotification('يوجد طلب استرداد معلّق لهذا اللاعب بالفعل', 'warning');
@@ -1608,14 +1674,14 @@ function requestRefund(index) {
  <div class="form-group"><label>المبلغ المراد استرداده (ج.م)</label><input type="number" id="refund-amount" value="${suggested}"></div>
  <div class="form-group"><label>سبب الإلغاء *</label><input type="text" id="refund-reason" placeholder="مثال: سفر / عدم الرضا / ظرف طارئ"></div>
  <div style="display:flex; gap:10px; margin-top:18px;">
- <button class="btn btn-warning" style="flex:1;" onclick="submitRefundRequest(${index})">إرسال الطلب (معلّق)</button>
+ <button class="btn btn-warning" style="flex:1;" onclick="submitRefundRequest('${esc(t.id)}')">إرسال الطلب (معلّق)</button>
  <button class="btn btn-outline" style="flex:1;" onclick="closeModal()">إلغاء</button>
  </div>`,
   );
 }
 
 function submitRefundRequest(index) {
-  const t = data.trainees[index];
+  const t = traineeByRef(index);
   if (!t) return;
   const amount = num(document.getElementById('refund-amount').value);
   const reason = document.getElementById('refund-reason').value.trim();
@@ -1777,6 +1843,8 @@ const PORTRAIT_CARD_CSS = `
  .row .k { color: rgba(233,237,243,0.55); flex: none; }
  .row .v { color: var(--gold-lt); font-weight: 700; text-align: right; }
  .code { z-index: 1; margin-top: 2mm; font-family: 'Courier New', monospace; font-size: 9px; font-weight: 700; letter-spacing: 1px; color: #fff; background: rgba(212,175,55,0.12); border: 0.25mm solid rgba(212,175,55,0.5); border-radius: 1.5mm; padding: 1mm 2mm; }
+ /* Employee-card name (players' cards carry no name; staff cards do). */
+ .emp-name { z-index: 1; margin-top: 1mm; font-size: 8px; font-weight: 800; color: #fff; max-width: 100%; padding: 0 1mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
  /* Contacts split into the two bottom corners: phones one side, socials other. */
  .contact { z-index: 1; margin-top: auto; width: 100%; display: flex; justify-content: space-between; align-items: flex-end; font-size: 4.6px; color: #E9EDF3; }
  .contact .col { display: flex; flex-direction: column; gap: 0.8mm; }
@@ -1834,6 +1902,36 @@ function cardBackHTML(code, logoUrl, extraStyle) {
  </div>`;
 }
 
+// FRONT face of an EMPLOYEE card — identical shape/size/style to the player
+// card (same PORTRAIT_CARD_CSS), but showing the staff member's name, role and
+// branch instead of a sport. The back is the shared white barcode face, so
+// staff cards read and print exactly like the players' keychain cards.
+function staffCardFrontHTML(e, code, logoUrl, extraStyle) {
+  const branchTxt = e.branch ? branchEn(e.branch) : '';
+  return `
+ <div class="card front" style="${extraStyle || ''}">
+ <img class="logo" src="${logoUrl}" alt="" onerror="this.style.display='none';">
+ <div class="academy"><span class="w">El Wasl</span> <span class="a">ACADEMY</span></div>
+ <div class="divider"></div>
+ <div class="emp-name">${esc(e.name)}</div>
+ <div class="rows">
+ ${e.role ? `<div class="row"><span class="k">Role</span><span class="v">${esc(e.role)}</span></div>` : ''}
+ ${branchTxt ? `<div class="row"><span class="k">Branch</span><span class="v">${esc(branchTxt)}</span></div>` : ''}
+ </div>
+ <div class="code">${esc(code)}</div>
+ <div class="contact">
+ <div class="col col-left">
+ <div class="p">${WA_ICON}<span>${ACADEMY_PHONES[0]}</span></div>
+ <div class="p">${TEL_ICON}<span>${ACADEMY_PHONES[1]}</span></div>
+ </div>
+ <div class="col col-right">
+ <div class="p"><span>${esc(ACADEMY_FACEBOOK)}</span>${FB_ICON}</div>
+ <div class="p"><span>${esc(ACADEMY_INSTAGRAM)}</span>${IG_ICON}</div>
+ </div>
+ </div>
+ </div>`;
+}
+
 // Front + back for ONE card (single-card window): each face on its own page.
 function portraitCardHTML(t, code, logoUrl) {
   return (
@@ -1864,159 +1962,67 @@ function barcodeRenderScript(printAfter) {
 // player data (name, sport from the code, branch); back is white with a barcode.
 function openCardWindow(t) {
   const logoUrl = new URL('src/logo-after.png', location.href).href;
-  const bcUrl = new URL('vendor/jsbarcode.min.js', location.href).href;
   const codes = traineeCodes(t);
   const list = codes.length ? codes : [''];
-  const win = window.open('', '_blank');
-  if (!win) {
-    showNotification('فعّل السماح بالنوافذ المنبثقة لطباعة البطاقة', 'warning');
-    return;
-  }
+  // Each face is its own card-sized 30x60mm page (front, back per code).
   const cards = list.map(code => portraitCardHTML(t, code, logoUrl)).join('');
-  win.document.write(`
- <html dir="rtl" lang="ar"><head><title>بطاقة العضوية - ${esc(t.id)}</title>
- <meta charset="UTF-8"> <script src="${bcUrl}"><\/script>
- <style>
- @page { size: 30mm 60mm; margin: 0; }
- * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
- html, body { margin: 0; padding: 0; background: #ffffff; }
- ${PORTRAIT_CARD_CSS}
- </style>
- </head>
- <body>
- ${cards}
- <script>window.onload = function(){ ${barcodeRenderScript(true)} };<\/script>
- </body></html>
- `);
-  win.document.close();
+  openPortraitCardPages(`بطاقة العضوية - ${t.id}`, cards);
 }
 
 // ==================== BATCH CARD PRINTING (A4 sheets) ====================
-// The single-card windows print one 90x56mm page per card, which forces the
-// print shop to guess an N-up layout (and shrinks the cards). These batch
-// printers instead lay many cards, at their true size, onto A4 pages with
-// light dashed cut guides — so "what they see is what prints". QR is loaded
-// from the local vendor file first (works offline), CDN only as a fallback.
+// The single-card windows print one small page per card, which forces the
+// print shop to guess an N-up layout (and shrinks the cards). The batch printer
+// instead lays many cards, at their true size, onto A4 pages with light dashed
+// cut guides — so "what they see is what prints". Players AND staff share the
+// same portrait keychain design (front + white barcode back).
 
-// A4 page + grid shell shared by both sheet printers.
-const SHEET_BASE_CSS = `
- @page { size: A4; margin: 8mm; }
- * { box-sizing: border-box; margin:0; padding:0; font-family:'Segoe UI',Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
- html, body { background:#fff; }
- .sheet { display:flex; flex-wrap:wrap; gap:4mm; align-content:flex-start; }
- .slot { width:90mm; height:56mm; break-inside:avoid; outline:0.2mm dashed #b0b0b0; }
- `;
-
-// Staff card look (deep-gold accent), colours inlined (constant per staff card).
-const STAFF_CARD_CSS = `
- .scard { position: relative; width: 90mm; height: 56mm; overflow: hidden; background: radial-gradient(60mm 40mm at 88% 8%, #C9A22726, transparent 60%), linear-gradient(135deg, #0E141C 0%, #161D2B 60%, #090C12 100%); border-radius: 8px; padding: 4.5mm 5mm; display: flex; flex-direction: column; justify-content: space-between; color: #E9EDF3; }
- .scard::before { content: ''; position: absolute; inset: 1.1mm; border: 0.5mm solid #C9A227; border-radius: 6px; pointer-events: none; }
- .scard::after { content: ''; position: absolute; top: 0; right: 0; left: 0; height: 1.6mm; background: #C9A227; }
- .s-top { display: flex; justify-content: space-between; align-items: center; z-index: 1; }
- .club-name { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 1px; }
- .club-name span { color: #C9A227; }
- .club-sub { font-size: 8px; letter-spacing: 2px; color: #C9A227; margin-top: 1.5mm; font-weight: 700; }
- .s-logo { height: 12mm; width: auto; }
- .s-divider { height: 0.3mm; background: linear-gradient(90deg, transparent, #C9A227, transparent); margin: 1mm 0; z-index: 1; }
- .s-body { display: flex; justify-content: space-between; align-items: center; gap: 4mm; z-index: 1; }
- .s-info { flex: 1; min-width: 0; }
- .lbl { font-size: 6.5px; letter-spacing: 1px; color: rgba(233,237,243,0.5); text-transform: uppercase; }
- .s-name { font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 1mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
- .s-role { font-size: 9px; color: #C9A227; font-weight: 600; margin-bottom: 1.5mm; }
- .s-code { font-size: 13px; font-family: 'Courier New', monospace; letter-spacing: 1px; color: #E9EDF3; font-weight: 700; }
- .s-qr { background: #fff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm #C9A227; }
- .s-footer { font-size: 6.5px; color: #C9A227; text-align: center; letter-spacing: 0.5px; z-index: 1; }
- `;
-
-// One staff card as an A4-sheet slot.
-function staffCardSlot(e, logoUrl) {
-  const code = e.code || '';
-  return `<div class="slot"><div class="scard">
- <div class="s-top"><div class="scard-brand"><div class="club-name">El Wasl <span>Academy</span></div><div class="club-sub">بطاقة موظف</div></div><img class="s-logo" src="${logoUrl}" alt="" onerror="this.style.display='none'"></div>
- <div class="s-divider"></div>
- <div class="s-body"><div class="s-info"><div class="lbl">الاسم</div><div class="s-name">${esc(e.name)}</div><div class="s-role">${esc(e.role || '-')} • ${esc(e.branch || 'غير محدد')}</div><div class="lbl">الكود</div><div class="s-code">${esc(code)}</div></div><div class="s-qr"><div class="qr" data-code="${esc(code)}"></div></div></div>
- <div class="s-footer">امسح الكود لتسجيل الحضور والانصراف</div>
- </div></div>`;
-}
-
-// Opens a print window that arranges the given card slots on A4 pages and,
-// once the QR library is ready, renders every QR then triggers print.
-function openCardsSheet(title, cardCss, slotsHtml) {
-  const qrUrl = new URL('vendor/qrcode.min.js', location.href).href;
-  const win = window.open('', '_blank');
-  if (!win) {
-    showNotification('فعّل السماح بالنوافذ المنبثقة للطباعة', 'warning');
-    return;
-  }
-  win.document.write(`
- <html dir="rtl" lang="ar"><head><title>${esc(title)}</title><meta charset="UTF-8"> <script src="${qrUrl}"><\/script>
- <style>${SHEET_BASE_CSS}${cardCss}</style></head>
- <body><div class="sheet">${slotsHtml}</div>
- <script>
- window.onload = function() {
- function render() {
- if (window.QRCode) document.querySelectorAll('.qr').forEach(function(el){ new QRCode(el, { text: el.getAttribute('data-code'), width: 96, height: 96, colorDark: "#1B2433", colorLight: "#ffffff" }); });
- setTimeout(function(){ window.print(); }, 500);
- }
- if (window.QRCode) render();
- else { var s = document.createElement('script'); s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload = render; s.onerror = render; document.head.appendChild(s); }
- };
- <\/script>
- </body></html>`);
-  win.document.close();
-}
-
-// A4 sheet shell for the PORTRAIT keychain tags: 30x60mm slots with cut guides,
-// and a barcode renderer (front slots have no barcode; back slots do).
-const SHEET_PORTRAIT_BASE_CSS = `
- @page { size: A4; margin: 8mm; }
- * { box-sizing: border-box; margin:0; padding:0; font-family:'Segoe UI',Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
- html, body { background:#fff; }
- .sheet { display:flex; flex-wrap:wrap; gap:4mm; align-content:flex-start; }
- .slot { width:30mm; height:60mm; break-inside:avoid; border-radius:3mm; overflow:hidden; outline:0.2mm dashed #b0b0b0; }
- .slot .card { border-radius:5mm; }
- `;
-
-// Opens an A4 print window arranging the portrait card faces, loads JsBarcode,
-// renders every back-face barcode, then prints. Offline-safe (local vendor lib).
-function openPortraitCardsSheet(title, slotsHtml) {
+// Opens a print window where EACH card face is its OWN card-sized page (30x60mm)
+// instead of an A4 sheet — so a card/label printer outputs cards at their exact
+// size, whether it's one card or many (front, back, front, back...). `facesHtml`
+// is the concatenated faces, each carrying its own page-break.
+function openPortraitCardPages(title, facesHtml, existingWin) {
   const bcUrl = new URL('vendor/jsbarcode.min.js', location.href).href;
-  const win = window.open('', '_blank');
+  const win = existingWin || window.open('', '_blank');
   if (!win) {
     showNotification('فعّل السماح بالنوافذ المنبثقة للطباعة', 'warning');
     return;
   }
   win.document.write(`
  <html dir="rtl" lang="ar"><head><title>${esc(title)}</title><meta charset="UTF-8"> <script src="${bcUrl}"><\/script>
- <style>${SHEET_PORTRAIT_BASE_CSS}${PORTRAIT_CARD_CSS}</style></head>
- <body><div class="sheet">${slotsHtml}</div>
+ <style>
+ @page { size: 30mm 60mm; margin: 0; }
+ * { box-sizing: border-box; margin:0; padding:0; font-family:'Segoe UI',Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+ html, body { margin:0; padding:0; background:#fff; }
+ ${PORTRAIT_CARD_CSS}
+ </style></head>
+ <body>${facesHtml}
  <script>window.onload = function(){ ${barcodeRenderScript(true)} };<\/script>
  </body></html>`);
   win.document.close();
 }
 
-// Print every active player's card(s) on A4 sheets (optionally one branch).
-// Each code produces a front slot + a back slot (barcode), in the new design.
+// Print every active player's card(s) (optionally one branch) — each face on its
+// own card-sized 30x60mm page (front, back per code), exactly like a single card,
+// so the whole run comes out at true card size instead of on A4 sheets.
 function printTraineeCardsSheet(branch) {
   const logoUrl = new URL('src/logo-after.png', location.href).href;
   const list = data.trainees.filter(t => t.type === 'subscription' && (!branch || (t.branch || '') === branch));
-  const slots = [];
+  const faces = [];
   list.forEach(t =>
     traineeCodes(t).forEach(code => {
-      if (code) {
-        slots.push(`<div class="slot">${cardFrontHTML(t, code, logoUrl, '')}</div>`);
-        slots.push(`<div class="slot">${cardBackHTML(code, logoUrl, '')}</div>`);
-      }
+      if (code) faces.push(portraitCardHTML(t, code, logoUrl));
     }),
   );
-  if (!slots.length) {
+  if (!faces.length) {
     showNotification('لا توجد كروت لاعبين للطباعة', 'warning');
     return;
   }
-  openPortraitCardsSheet('كروت اللاعبين', slots.join(''));
+  openPortraitCardPages('كروت اللاعبين', faces.join(''));
 }
 
-// Print every staff member's card on A4 sheets (optionally one branch).
+// Print every staff member's card (optionally one branch) — each face on its own
+// card-sized 30x60mm page (front, back, front, back...), exactly like the single
+// card, so the whole run comes out at true card size instead of on A4 sheets.
 function printStaffCardsSheet(branch) {
   ensureStaffCodes();
   const logoUrl = new URL('src/logo-after.png', location.href).href;
@@ -2025,7 +2031,14 @@ function printStaffCardsSheet(branch) {
     showNotification('لا توجد كروت موظفين للطباعة (تأكد من وجود أكواد)', 'warning');
     return;
   }
-  openCardsSheet('كروت الموظفين', STAFF_CARD_CSS, list.map(e => staffCardSlot(e, logoUrl)).join(''));
+  const faces = list
+    .map(
+      e =>
+        staffCardFrontHTML(e, e.code, logoUrl, 'page-break-after: always;') +
+        cardBackHTML(e.code, logoUrl, 'page-break-after: always;'),
+    )
+    .join('');
+  openPortraitCardPages('كروت الموظفين', faces);
 }
 
 // ==================== ATTENDANCE ====================
@@ -2036,7 +2049,11 @@ function onAttendanceInput() {
   clearTimeout(attendanceInputTimer);
   attendanceInputTimer = setTimeout(() => {
     const cur = document.getElementById('attendance-code').value.trim();
-    if (cur && findTraineeByCode(cur)) {
+    // Auto-record only on an unambiguous pick: a scanned/typed card code, or a
+    // "name — code" value chosen from the datalist. A bare partial name never
+    // auto-fires — the user picks a suggestion (or presses the button), so we
+    // don't record the wrong player mid-typing.
+    if (cur && (findTraineeByCode(cur) || (cur.includes(' — ') && findTraineeByNameOrCode(cur)))) {
       recordAttendance();
     }
   }, 150);
@@ -2046,19 +2063,24 @@ async function recordAttendance() {
   const raw = document.getElementById('attendance-code').value.trim();
 
   if (!raw) {
-    showNotification('يرجى إدخال كود اللاعب', 'warning');
+    showNotification('يرجى إدخال كود أو اسم اللاعب', 'warning');
     return;
   }
 
-  const trainee = findTraineeByCode(raw);
+  // Accepts a scanned/typed card code, a "name — code" datalist pick, or an
+  // exact player name.
+  const trainee = findTraineeByNameOrCode(raw);
   if (!trainee) {
     renderAttendanceCard(null, null, { state: 'notfound', code: raw });
     return;
   }
   const code = trainee.id; // canonical stored id for this player
-  // Which sport this check-in is for: derived from the SCANNED code's number
-  // block, falling back to the player's primary sport.
-  const attendedSport = sportForCode(raw) || traineeSports(trainee)[0] || '';
+  // The real card code involved: the scanned/typed one when a code was entered,
+  // otherwise the player's id (name lookup carries no specific card).
+  const attendedCode = findTraineeByCode(raw) ? raw : trainee.id;
+  // Which sport this check-in is for: derived from the card code's number block,
+  // falling back to the player's primary sport.
+  const attendedSport = sportForCode(attendedCode) || traineeSports(trainee)[0] || '';
 
   const info = subInfo(trainee);
 
@@ -2092,6 +2114,12 @@ async function recordAttendance() {
   const absBefore = lastAttendanceInfo(trainee);
   const returnedAfter = !absBefore.neverAttended && absBefore.days >= ABSENCE_ALERT_DAYS ? absBefore.days : 0;
 
+  // Session-based subs spend one session per check-in. We record this on the
+  // attendance row so that if the insert is later rejected as a cross-device
+  // duplicate (e.g. it was queued offline), the outbox can refund the session
+  // it optimistically consumed — see restoreConsumedSession in the data layer.
+  const isSessionSub = trainee.type === 'subscription' && info.kind === 'sessions';
+
   const now = new Date();
   const time = now.toLocaleTimeString('ar-EG');
   const attendanceEntry = {
@@ -2102,7 +2130,8 @@ async function recordAttendance() {
     status: 'حاضر',
     branch: trainee.branch || 'غير محدد',
     sport: attendedSport,
-    code: raw,
+    code: attendedCode,
+    sessionConsumed: isSessionSub,
   };
   data.attendance.push(attendanceEntry);
   // Await the insert: the DB's unique index is the real duplicate guard — the
@@ -2118,8 +2147,11 @@ async function recordAttendance() {
   }
 
   // Consume one session for session-based subscriptions. Runs only when this
-  // device's insert won the race, so two devices can't both decrement.
-  if (trainee.type === 'subscription' && info.kind === 'sessions') {
+  // device's insert won the race, so two online devices can't both decrement.
+  // Offline, the insert is queued and this decrement is optimistic — if the
+  // queued row turns out to be a duplicate at upload time, the outbox refunds
+  // the session (restoreConsumedSession), so it's never spent twice.
+  if (isSessionSub) {
     trainee.sessionsRemaining = num(trainee.sessionsRemaining) - 1;
     if (trainee.sessionsRemaining <= 0) trainee.status = 'منتهي';
     dbSetDoc(traineesCol, trainee.id, trainee);
@@ -2365,31 +2397,30 @@ function onExtraTypeChange() {
   if (grp) grp.style.display = val('extra-type') === 'مبيعات' ? '' : 'none';
 }
 
-// Fills the #extra-player autocomplete with every registered player as
+// Fills a player-search <datalist> with every registered player as
 // "الاسم — الكود", so the field can be filtered by typing either the name or
-// the code, while still accepting any free text for an unregistered person.
-function populateExtraPlayerList() {
-  const dl = document.getElementById('extra-player-list');
+// the code. Shared by the extra-income and attendance pickers so the value
+// format stays identical (both resolve it via findTraineeByNameOrCode /
+// resolveExtraPlayer).
+function fillPlayerDatalist(id) {
+  const dl = document.getElementById(id);
   if (!dl) return;
   dl.innerHTML = (data.trainees || []).map(t => `<option value="${esc(t.name)} — ${esc(t.id)}"></option>`).join('');
 }
+function populateExtraPlayerList() {
+  fillPlayerDatalist('extra-player-list');
+}
+function populateAttendancePlayerList() {
+  fillPlayerDatalist('attendance-player-list');
+}
 
 // Turns whatever the user typed/picked in #extra-player into { id, name }.
-// Matches (in order): the "name — code" datalist value, a bare code, then a
-// unique exact name. Anything else is treated as a manual (unlinked) name.
+// Reuses the shared lookup (code / "name — code" pick / exact unique name);
+// anything that doesn't resolve is kept as a manual, unlinked name.
 function resolveExtraPlayer(raw) {
-  const s = (raw || '').trim();
-  if (!s) return { id: '—', name: '' };
-  if (s.includes(' — ')) {
-    const t = findTraineeByCode(s.split(' — ').pop().trim());
-    if (t) return { id: t.id, name: t.name };
-  }
-  const byCode = findTraineeByCode(s);
-  if (byCode) return { id: byCode.id, name: byCode.name };
-  const nm = s.toLowerCase();
-  const byName = (data.trainees || []).filter(t => (t.name || '').trim().toLowerCase() === nm);
-  if (byName.length === 1) return { id: byName[0].id, name: byName[0].name };
-  return { id: '—', name: s }; // unregistered / manual name
+  const t = findTraineeByNameOrCode(raw);
+  if (t) return { id: t.id, name: t.name };
+  return { id: '—', name: (raw || '').trim() }; // unregistered / manual name
 }
 
 function addExtraIncome() {
@@ -2595,11 +2626,11 @@ function updateSalaries() {
  <td><span class="badge badge-success">${esc(e.status)}</span></td>
  <td style="font-size:11px; color:rgba(48,56,65,0.55);">${esc(e.createdBy || '—')}</td>
  <td>
- <button class="btn btn-success btn-sm" onclick="paySalary(${i})">صرف</button>
+ <button class="btn btn-success btn-sm" onclick="paySalary('${esc(e.id)}')">صرف</button>
  <button class="btn btn-warning btn-sm" onclick="openStaffAdvance('${esc(e.id)}')">سلفة</button>
  <button class="btn btn-warning btn-sm" onclick="openStaffDeduction('${esc(e.id)}')">خصم</button>
  <button class="btn btn-outline btn-sm" onclick="editEmployee('${esc(e.id)}')">تعديل</button>
- <button class="btn btn-danger btn-sm" onclick="deleteEmployee(${i})">حذف</button>
+ <button class="btn btn-danger btn-sm" onclick="deleteEmployee('${esc(e.id)}')">حذف</button>
  </td>
  </tr>
  `,
@@ -2636,14 +2667,14 @@ function updateSalaries() {
 
 // Opens a styled confirmation popup (not a native confirm dialog).
 function paySalary(index) {
-  const emp = data.employees[index];
+  const emp = employeeByRef(index);
   if (!emp) return;
   openModal(
     `صرف راتب - ${emp.name}`,
     `
  <p style="margin-bottom:18px; font-size:15px;">تأكيد صرف راتب <strong>${esc(emp.name)}</strong> بمبلغ <strong style="color:var(--warning);">${num(emp.salary).toLocaleString()} ج.م</strong>؟</p>
  <div style="display:flex; gap:10px;">
- <button class="btn btn-success" style="flex:1;" onclick="doPaySalary(${index})">تأكيد الصرف</button>
+ <button class="btn btn-success" style="flex:1;" onclick="doPaySalary('${esc(emp.id)}')">تأكيد الصرف</button>
  <button class="btn btn-outline" style="flex:1;" onclick="closeModal()">إلغاء</button>
  </div>
  `,
@@ -2651,7 +2682,7 @@ function paySalary(index) {
 }
 
 function doPaySalary(index) {
-  const emp = data.employees[index];
+  const emp = employeeByRef(index);
   if (!emp) return;
   const today = todayAr();
   const expense = {
@@ -2672,9 +2703,10 @@ function doPaySalary(index) {
 }
 
 function deleteEmployee(index) {
+  const emp = employeeByRef(index);
+  if (!emp) return;
   if (confirm('هل تريد حذف هذا الموظف؟')) {
-    const emp = data.employees[index];
-    data.employees.splice(index, 1);
+    data.employees.splice(data.employees.indexOf(emp), 1);
     dbDeleteDoc(employeesCol, emp.id);
     updateSalaries();
   }
@@ -2756,13 +2788,30 @@ function saveEmployeeEdit(id) {
 
 // ==================== EDIT / DELETE FINANCIAL RECORDS ====================
 // Editing/deleting payments and expenses is restricted to admins, both in
-// the UI here and enforced server-side by Supabase row-level security.
+// the UI here and enforced server-side by Supabase row-level security once
+// enable-rls-security.sql has been applied (is_admin() policies).
+
+// ---- Live-total maintenance ----
+// dbSetDoc only bumps the running dashboard totals (stats/statsByBranch) on
+// INSERT. So when a payment or expense is EDITED or DELETED without a full
+// reload, the total must be adjusted by hand — otherwise the dashboard KPI
+// stays stale (too high after a delete) until the next load. `delta` is the
+// signed change to apply: negative to remove, or (new − old) for an edit.
+function bumpRevenueBy(payment, delta) {
+  if (delta && typeof bumpStat === 'function' && countsAsRevenue(payment)) {
+    bumpStat('revenue', delta, payment.branch);
+  }
+}
+function bumpExpenseBy(expense, delta) {
+  if (delta && typeof bumpStat === 'function') bumpStat('expenses', delta, expense.branch);
+}
 
 function deletePayment(docId) {
   if (currentRole !== 'admin') return;
   const p = data.payments.find(x => x._docId === docId);
   if (!p) return;
   if (!confirm(`حذف عملية الدفع لـ "${p.name}" بمبلغ ${num(p.amount).toLocaleString()} ج.م؟`)) return;
+  bumpRevenueBy(p, -num(p.amount)); // keep the dashboard total in sync now
   data.payments = data.payments.filter(x => x._docId !== docId);
   dbDeleteDoc(paymentsCol, docId);
   updateFinancial();
@@ -2806,9 +2855,11 @@ function savePaymentEdit(docId) {
   if (currentRole !== 'admin') return;
   const p = data.payments.find(x => x._docId === docId);
   if (!p) return;
+  const oldAmount = num(p.amount);
   p.amount = num(document.getElementById('edit-pay-amount').value);
   p.method = document.getElementById('edit-pay-method').value;
   p.date = document.getElementById('edit-pay-date').value.trim() || p.date;
+  bumpRevenueBy(p, num(p.amount) - oldAmount); // reflect the amount change on the dashboard now
   dbSetDoc(paymentsCol, docId, p);
   closeModal();
   updateFinancial();
@@ -2821,6 +2872,7 @@ function deleteExpense(id) {
   const e = data.expenses.find(x => x.id === id);
   if (!e) return;
   if (!confirm(`حذف هذا المصروف "${e.type}" بمبلغ ${num(e.amount).toLocaleString()} ج.م؟`)) return;
+  bumpExpenseBy(e, -num(e.amount)); // keep the dashboard total in sync now
   data.expenses = data.expenses.filter(x => x.id !== id);
   dbDeleteDoc(expensesCol, id);
   updateSalaries();
@@ -2859,9 +2911,11 @@ function saveExpenseEdit(id) {
   if (currentRole !== 'admin') return;
   const e = data.expenses.find(x => x.id === id);
   if (!e) return;
+  const oldAmount = num(e.amount);
   e.desc = document.getElementById('edit-exp-desc').value.trim();
   e.amount = num(document.getElementById('edit-exp-amount').value);
   e.date = document.getElementById('edit-exp-date').value.trim() || e.date;
+  bumpExpenseBy(e, num(e.amount) - oldAmount); // reflect the amount change on the dashboard now
   dbSetDoc(expensesCol, id, e);
   closeModal();
   updateSalaries();
@@ -2949,7 +3003,6 @@ function renderStudentAlerts() {
 
   box.innerHTML = items
     .map(({ t, badges, renew }) => {
-      const idx = data.trainees.indexOf(t);
       const badgeHtml = badges.map(b => `<span class="badge ${b.cls}">${esc(b.label)}</span>`).join(' ');
       const renewBtn = renew
         ? `<button class="btn btn-warning btn-sm" onclick="goRenew('${esc(t.id)}')">تجديد</button>`
@@ -2963,7 +3016,7 @@ function renderStudentAlerts() {
  <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
  ${badgeHtml}
  ${renewBtn}
- <button class="btn btn-outline btn-sm" onclick="viewTrainee(${idx})">عرض</button>
+ <button class="btn btn-outline btn-sm" onclick="viewTrainee('${esc(t.id)}')">عرض</button>
  </div>
  </div>`;
     })
@@ -3170,8 +3223,8 @@ async function recordGroupAttendance(groupId) {
 
 function toggleCoachPayType() {
   const type = document.getElementById('coach-pay-type').value;
-  document.getElementById('coach-salary-group').style.display = type === 'monthly' ? 'flex' : 'none';
-  document.getElementById('coach-rate-group').style.display = type === 'percentage' ? 'flex' : 'none';
+  const rate = document.getElementById('coach-rate-group');
+  if (rate) rate.style.display = type === 'percentage' ? 'flex' : 'none';
 }
 
 // ---- Coach groups (multi-add chips, same pattern as the card codes). At
@@ -3205,21 +3258,21 @@ function addCoach() {
   const name = val('coach-name').trim();
   const phone = val('coach-phone').trim();
   const specialty = val('coach-specialty').trim();
-  const branch = val('coach-branch');
   const payType = val('coach-pay-type');
-  const salary = val('coach-salary');
   const rate = val('coach-rate');
+  // One or more branches, each with its own salary.
+  const branchSalaries = collectCoachBranchRows('add');
   // Groups: the chips plus any name still typed but not added.
   const groups = coachGroups.slice();
   const typedGroup = val('coach-groups').trim();
   if (typedGroup && !groups.includes(typedGroup)) groups.push(typedGroup);
 
-  if (!name || !branch) {
-    showNotification('يرجى إدخال اسم المدرب والفرع', 'warning');
+  if (!name || !branchSalaries.length) {
+    showNotification('يرجى إدخال اسم المدرب وفرع واحد على الأقل', 'warning');
     return;
   }
-  if (payType === 'monthly' && (!salary || parseInt(salary) <= 0)) {
-    showNotification('يرجى إدخال الراتب الشهري', 'warning');
+  if (payType === 'monthly' && branchSalaries.reduce((s, r) => s + num(r.salary), 0) <= 0) {
+    showNotification('يرجى إدخال الراتب الشهري لفرع واحد على الأقل', 'warning');
     return;
   }
   if (payType === 'percentage' && (!rate || parseFloat(rate) <= 0)) {
@@ -3238,9 +3291,11 @@ function addCoach() {
     phone,
     role: 'مدرب',
     specialty,
-    branch,
+    branchSalaries,
+    // Primary branch kept in sync for legacy readers (groups, branch filters).
+    branch: branchSalaries[0].branch,
     payType,
-    salary: payType === 'monthly' ? parseInt(salary) : 0,
+    salary: payType === 'monthly' ? branchSalaries.reduce((s, r) => s + num(r.salary), 0) : 0,
     percentageRate: payType === 'percentage' ? parseFloat(rate) : 0,
     status: 'نشط',
     joinDate: todayAr(),
@@ -3253,11 +3308,12 @@ function addCoach() {
   setVal('coach-name', '');
   setVal('coach-phone', '');
   setVal('coach-specialty', '');
-  setVal('coach-salary', '');
   setVal('coach-rate', '');
   setVal('coach-groups', '');
   coachGroups = [];
   renderCoachGroupsChips();
+  coachBranchState.add = [{ branch: '', salary: '' }];
+  renderCoachBranchRows('add');
   showNotification(`تم إضافة المدرب ${name}`);
 }
 
@@ -3285,6 +3341,79 @@ function ensureCoachGroups(coach, names) {
     added++;
   });
   if (added) showNotification(`تم إنشاء ${added} جروب للمدرب ${coach.name}`);
+}
+
+// ---- Branch+salary row editor (shared by the add form and the edit modal) ----
+// `which` is 'add' or 'edit'; each keeps its own draft rows so both can be open
+// without clashing. Typing only updates state (no re-render) so focus is kept.
+const coachBranchState = { add: [], edit: [] };
+const COACH_ROWS_BOX = { add: 'coach-branch-rows', edit: 'edit-coach-branch-rows' };
+
+function renderCoachBranchRows(which) {
+  const box = document.getElementById(COACH_ROWS_BOX[which]);
+  if (!box) return;
+  const rows = coachBranchState[which];
+  box.innerHTML =
+    rows
+      .map(
+        (r, i) => `
+ <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+ <select onchange="setCoachBranchRow('${which}',${i},'branch',this.value)" style="flex:1;">${branchOptionsHTML(r.branch)}</select>
+ <input type="number" placeholder="المرتب" value="${r.salary === '' ? '' : num(r.salary)}"
+ oninput="setCoachBranchRow('${which}',${i},'salary',this.value)" style="width:130px;">
+ <button type="button" class="btn btn-danger btn-sm" onclick="removeCoachBranchRow('${which}',${i})">✕</button>
+ </div>`,
+      )
+      .join('') +
+    `<button type="button" class="btn btn-outline btn-sm" onclick="addCoachBranchRow('${which}')">➕ أضف فرع</button>`;
+}
+function addCoachBranchRow(which) {
+  coachBranchState[which].push({ branch: '', salary: '' });
+  renderCoachBranchRows(which);
+}
+function removeCoachBranchRow(which, i) {
+  coachBranchState[which].splice(i, 1);
+  renderCoachBranchRows(which);
+}
+function setCoachBranchRow(which, i, field, value) {
+  const r = coachBranchState[which][i];
+  if (r) r[field] = value;
+}
+// Validated rows ready to store: a branch is required, duplicates are dropped.
+function collectCoachBranchRows(which) {
+  const seen = new Set();
+  return coachBranchState[which]
+    .filter(r => r.branch && !seen.has(r.branch) && seen.add(r.branch))
+    .map(r => ({ branch: r.branch, salary: num(r.salary) }));
+}
+
+// ---- Multi-branch coaches ----
+// A coach can work in SEVERAL branches, each with its own monthly salary, stored
+// as branchSalaries: [{ branch, salary }]. Legacy coaches (a single `branch` +
+// `salary`) are normalized to the same shape, so every caller reads one thing.
+function coachBranchSalaries(c) {
+  const rows = (c && c.branchSalaries) || [];
+  if (rows.length) return rows.filter(r => r && r.branch).map(r => ({ branch: r.branch, salary: num(r.salary) }));
+  return c && c.branch ? [{ branch: c.branch, salary: num(c.salary) }] : [];
+}
+function coachBranches(c) {
+  return coachBranchSalaries(c).map(r => r.branch);
+}
+function coachTotalSalary(c) {
+  return coachBranchSalaries(c).reduce((s, r) => s + num(r.salary), 0);
+}
+
+// Every player who belongs to a coach: members of the groups he leads, plus
+// anyone whose `trainer` field names him. Deduped — one source of truth for the
+// coach report and the "لاعبين الكابتن" view.
+function coachPlayers(c) {
+  if (!c) return [];
+  const name = (c.name || '').trim();
+  const ids = new Set();
+  (data.groups || [])
+    .filter(g => (g.trainer || '').trim() === name)
+    .forEach(g => (g.memberIds || []).forEach(m => ids.add(m)));
+  return (data.trainees || []).filter(t => ids.has(t.id) || (t.trainer || '').trim() === name);
 }
 
 // Total ever collected from a coach's players — the sum of every payment that
@@ -3322,13 +3451,16 @@ function recordCoachTransfer(t, oldCoach, newCoach) {
   showNotification(`تم نقل ${value.toLocaleString()} ج.م من نسبة ${oldCoach} إلى ${newCoach} (قيمة الحصص المتبقية)`);
 }
 
-// Total paid to a staff member within the current calendar month.
-function paidThisMonthForStaff(staffId, positiveOnly) {
+// Total paid to a staff member within the current calendar month. Pass `branch`
+// to count only what was paid FROM that branch — that's what makes each branch's
+// "remaining salary" correct for a coach who works in more than one.
+function paidThisMonthForStaff(staffId, positiveOnly, branch) {
   const now = new Date();
   const y = now.getFullYear(),
     m = now.getMonth();
   return data.expenses.reduce((sum, e) => {
     if (e.staffId !== staffId) return sum;
+    if (branch && (e.branch || '') !== branch) return sum;
     if (positiveOnly && num(e.amount) < 0) return sum; // ignore deductions for "remaining to pay"
     const ts = parseDate(e.date);
     if (!ts) return sum;
@@ -3341,6 +3473,9 @@ function renderCoachesSection() {
   // Specialty is picked from the academy's sports list (populated once).
   const spec = document.getElementById('coach-specialty');
   if (spec && !spec.options.length) spec.innerHTML = sportOptionsHTML('');
+  // Seed the add-form's branch+salary editor with one empty row.
+  if (!coachBranchState.add.length) coachBranchState.add = [{ branch: '', salary: '' }];
+  renderCoachBranchRows('add');
   const tbody = document.getElementById('coaches-table');
   if (!tbody) return;
   const coaches = getCoaches();
@@ -3353,33 +3488,150 @@ function renderCoachesSection() {
   tbody.innerHTML = coaches
     .map(c => {
       const paid = paidThisMonthForStaff(c.id);
+      const rows = coachBranchSalaries(c);
+      // One badge per branch, each with the salary agreed for that branch.
+      const branchCell = rows.length
+        ? rows
+            .map(
+              r =>
+                `<div style="margin-bottom:3px;">${branchBadge(r.branch)}${
+                  c.payType === 'percentage'
+                    ? ''
+                    : ` <span style="font-size:11px; font-weight:700;">${num(r.salary).toLocaleString()} ج.م</span>`
+                }</div>`,
+            )
+            .join('')
+        : '—';
       const contract =
         c.payType === 'percentage'
-          ? `<span class="badge badge-info">نسبة ${num(c.percentageRate)}%</span>`
-          : `<span class="badge badge-success">شهري ${num(c.salary).toLocaleString()} ج.م</span>`;
+          ? `<span class="badge badge-info">نسبة ${num(c.percentageRate)}% (يدوي)</span>`
+          : `<span class="badge badge-success">شهري ${coachTotalSalary(c).toLocaleString()} ج.م</span>`;
       const groupCount = (data.groups || []).filter(g => g.trainer === c.name).length;
-      const payBtn =
-        c.payType === 'percentage'
-          ? `<button class="btn btn-success btn-sm" onclick="payCoachPercentage('${esc(c.id)}')">صرف نسبة</button>`
-          : `<button class="btn btn-success btn-sm" onclick="payCoachMonthly('${esc(c.id)}')">صرف الراتب</button>`;
       return `
  <tr>
  <td><strong>${esc(c.name)}</strong>${c.phone ? `<div style="font-size:11px; color:rgba(48,56,65,0.5);">${esc(c.phone)}</div>` : ''}</td>
  <td>${esc(c.specialty || '-')}</td>
- <td>${branchBadge(c.branch)}</td>
+ <td>${branchCell}</td>
  <td>${contract}</td>
  <td style="font-weight:700; color: var(--danger);">${paid.toLocaleString()} ج.م</td>
  <td>${groupCount}</td>
  <td style="font-size:11px; color:rgba(48,56,65,0.55);">${esc(c.createdBy || '—')}</td>
  <td>
- ${payBtn}
+ <button class="btn btn-success btn-sm" onclick="payCoachSalary('${esc(c.id)}')">صرف</button>
  <button class="btn btn-warning btn-sm" onclick="payCoachAdvance('${esc(c.id)}')">سلفة</button>
  <button class="btn btn-warning btn-sm" onclick="openStaffDeduction('${esc(c.id)}')">خصم</button>
+ <button class="btn btn-outline btn-sm" onclick="viewCoachPlayers('${esc(c.id)}')">اللاعبين (${coachPlayers(c).length})</button>
  <button class="btn btn-outline btn-sm" onclick="editCoach('${esc(c.id)}')">تعديل</button>
+ <button class="btn btn-primary btn-sm" onclick="printCoachReport('${esc(c.id)}')">تقرير</button>
  <button class="btn btn-danger btn-sm" onclick="deleteCoach('${esc(c.id)}')">حذف</button>
  </td>
  </tr>`;
     })
+    .join('');
+}
+
+// Printable one-coach report: his contract, groups, the players inside his
+// groups (with subscription status), total collected from his players, and
+// what he was paid this month. Opens as a print-ready PDF page.
+function printCoachReport(id) {
+  const c = data.employees.find(e => e.id === id);
+  if (!c) return;
+  const groups = (data.groups || []).filter(g => g.trainer === c.name);
+  const players = coachPlayers(c);
+  const collected = collectedForCoach(c.name);
+  const paidThisMonth = paidThisMonthForStaff(c.id);
+  const activeCount = players.filter(t => t.status === 'نشط').length;
+
+  const playerRows =
+    players
+      .map(t => {
+        const info = subInfo(t);
+        return `<tr>
+ <td>${esc(t.id)}</td>
+ <td>${esc(t.name)}</td>
+ <td>${esc(t.phone || '-')}</td>
+ <td>${esc(sportLabel(t))}</td>
+ <td>${esc(t.status)}</td>
+ <td>${esc(info.remLabel || '-')}</td>
+ </tr>`;
+      })
+      .join('') || '<tr><td colspan="6" style="text-align:center; color:#9aa1ab;">لا يوجد لاعبون</td></tr>';
+
+  const groupRows =
+    groups
+      .map(
+        g => `<tr><td>${esc(g.name)}</td><td>${branchBadge(g.branch)}</td><td>${(g.memberIds || []).length}</td></tr>`,
+      )
+      .join('') || '<tr><td colspan="3" style="text-align:center; color:#9aa1ab;">لا توجد جروبات</td></tr>';
+
+  reportDoc(
+    `تقرير المدرب — ${c.name}`,
+    `
+ <div class="section-block">
+ <div class="report-title">تقرير المدرب: ${esc(c.name)}</div>
+ <div class="summary-row">
+ ${summaryBox('التخصص', esc(c.specialty || '-'))}
+ ${summaryBox('الفروع', esc(coachBranches(c).join('، ') || 'غير محدد'))}
+ ${summaryBox(
+   'نوع التعاقد',
+   c.payType === 'percentage'
+     ? `نسبة ${num(c.percentageRate)}% (صرف يدوي)`
+     : coachBranchSalaries(c)
+         .map(r => `${esc(r.branch)}: ${num(r.salary).toLocaleString()}`)
+         .join(' • ') + ` = ${coachTotalSalary(c).toLocaleString()} ج.م`,
+ )}
+ ${summaryBox('عدد اللاعبين', `${players.length} (نشط: ${activeCount})`)}
+ ${summaryBox('إجمالي المحصّل من لاعبيه', `${collected.toLocaleString()} ج.م`)}
+ ${summaryBox('مصروف له هذا الشهر', `${paidThisMonth.toLocaleString()} ج.م`)}
+ </div>
+ <table>
+ <thead><tr><th colspan="3" style="text-align:right; background:#B8901F;">الجروبات</th></tr><tr><th>الجروب</th><th>الفرع</th><th>عدد اللاعبين</th></tr></thead>
+ <tbody>${groupRows}</tbody>
+ </table>
+ <table>
+ <thead><tr><th colspan="6" style="text-align:right; background:#B8901F;">اللاعبون</th></tr><tr><th>الكود</th><th>الاسم</th><th>الهاتف</th><th>الرياضة</th><th>الحالة</th><th>المتبقي</th></tr></thead>
+ <tbody>${playerRows}</tbody>
+ </table>
+ </div>`,
+  );
+}
+
+// Last-6-months countable-revenue trend (subscriptions + sales), rendered as
+// simple CSS bars in the financial dashboard. Computed from the LOADED
+// payments — load "كل الفترة" for exact history.
+function renderMonthlyTrend(branch) {
+  const box = document.getElementById('fd-monthly-trend');
+  if (!box) return;
+  const now = new Date();
+  const months = [];
+  for (let k = 5; k >= 0; k--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - k, 1);
+    months.push({
+      y: d.getFullYear(),
+      m: d.getMonth(),
+      label: d.toLocaleDateString('ar-EG', { month: 'long' }),
+      total: 0,
+    });
+  }
+  (data.payments || []).forEach(p => {
+    if (branch && branch !== 'الكل' && p.branch !== branch) return;
+    if (!countsAsRevenue(p)) return;
+    const ts = parseDate(p.date);
+    if (!ts) return;
+    const d = new Date(ts);
+    const slot = months.find(x => x.y === d.getFullYear() && x.m === d.getMonth());
+    if (slot) slot.total += num(p.amount);
+  });
+  const max = Math.max(...months.map(x => x.total), 1);
+  box.innerHTML = months
+    .map(
+      x => `
+ <div class="trend-col">
+ <div class="trend-val">${Math.round(x.total).toLocaleString()}</div>
+ <div class="trend-bar" style="height:${Math.max(4, Math.round((x.total / max) * 90))}px"></div>
+ <div class="trend-lbl">${esc(x.label)}</div>
+ </div>`,
+    )
     .join('');
 }
 
@@ -3414,7 +3666,8 @@ function renderCoachComparison(coaches) {
         0,
         Math.round((data.payments || []).reduce((s, p) => (memberIds.has(p.id) ? s + num(p.amount) : s), 0)),
       );
-      return { name: c.name, branch: c.branch, collected, players };
+      // A coach can work in several branches — show them all, not just the first.
+      return { name: c.name, branches: coachBranches(c), collected, players };
     })
     .sort((a, b) => b.collected - a.collected || b.players - a.players);
   const maxMoney = Math.max(1, ...rows.map(r => r.collected));
@@ -3435,7 +3688,7 @@ function renderCoachComparison(coaches) {
      (r, i) => `<tr style="border-bottom:1px solid rgba(48,56,65,0.08);">
  <td style="padding:8px 10px; font-size:15px;">${medal(i)}</td>
  <td style="padding:8px 10px; font-weight:700;">${esc(r.name)}</td>
- <td style="padding:8px 10px;">${branchBadge(r.branch)}</td>
+ <td style="padding:8px 10px;">${r.branches.length ? r.branches.map(b => branchBadge(b)).join(' ') : '—'}</td>
  <td style="padding:8px 10px;">
  <div style="display:flex; align-items:center; gap:8px;">
  <div style="flex:1; height:14px; background:rgba(48,56,65,0.07); border-radius:7px; overflow:hidden;"><div style="width:${Math.round((r.collected / maxMoney) * 100)}%; height:100%; background:var(--success); border-radius:7px;"></div></div>
@@ -3456,14 +3709,17 @@ function renderCoachComparison(coaches) {
 }
 
 // Records a coach payout as an expense tagged with the coach's id.
-function recordCoachExpense(coach, type, amount, desc) {
+// `branch` books the cost to the branch it belongs to — essential for a coach
+// who works in several branches, so each branch's profit carries only its own
+// share. Falls back to the coach's primary branch.
+function recordCoachExpense(coach, type, amount, desc, branch) {
   const prefix = type === 'سلفة' ? 'ADV' : type === 'نسبة' ? 'PCT' : 'SAL';
   const expense = {
     id: `${prefix}-${Date.now()}`,
     type,
     desc,
     amount,
-    branch: coach.branch,
+    branch: branch || coach.branch,
     date: todayAr(),
     staffId: coach.id,
   };
@@ -3484,6 +3740,14 @@ function openStaffDeduction(id) {
     `خصم - ${e.name}`,
     `
  <p style="color:rgba(48,56,65,0.6); margin-bottom:16px;">خصم مبلغ من مستحقات <strong>${esc(e.name)}</strong> — يقلّل صافي ما يتقاضاه وصافي مصروف الأكاديمية.</p>
+ ${
+   coachBranches(e).length > 1
+     ? `<div class="form-group"><label>يُخصم من فرع</label>
+ <select id="ded-branch-select">${coachBranches(e)
+   .map(b => `<option value="${esc(b)}">${esc(b)}</option>`)
+   .join('')}</select></div>`
+     : ''
+ }
  <div class="form-group"><label>مبلغ الخصم (ج.م)</label><input type="number" id="ded-amount-input" placeholder="المبلغ"></div>
  <div class="form-group"><label>السبب</label><input type="text" id="ded-reason-input" placeholder="مثال: غياب / تأخير / مخالفة"></div>
  <div style="display:flex; gap:10px; margin-top:18px;">
@@ -3506,7 +3770,8 @@ function confirmStaffDeduction(id) {
     type: 'خصم',
     desc: `خصم ${e.name}${reason ? ' - ' + reason : ''}`,
     amount: -amount, // negative -> reduces academy net expense + staff net pay
-    branch: e.branch,
+    // Multi-branch staff pick which branch the deduction belongs to.
+    branch: (document.getElementById('ded-branch-select') || {}).value || e.branch,
     date: todayAr(),
     staffId: e.id,
   });
@@ -3564,38 +3829,77 @@ function confirmStaffAdvance(id) {
 
 // All coach payouts open a styled popup (the app modal) instead of the
 // browser's native prompt/confirm dialogs.
-function payCoachMonthly(id) {
+// Salary payout, ONE ROW PER BRANCH. Each branch shows its own salary, what was
+// already paid from it this month and what's left — and paying books the expense
+// to THAT branch, so no branch carries another branch's cost. Percentage coaches
+// use the same screen: the amount is simply typed in (their rate is contractual
+// info only, nothing is auto-calculated).
+function payCoachSalary(id) {
   const c = data.employees.find(e => e.id === id);
   if (!c) return;
-  const paid = paidThisMonthForStaff(id, true); // count positive payouts only (deductions don't raise "remaining")
-  const remaining = Math.max(0, num(c.salary) - paid);
-  openModal(
-    `صرف راتب - ${c.name}`,
-    `
- <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:18px;">
- ${attRow('الراتب الشهري', num(c.salary).toLocaleString() + ' ج.م')}
+  const rows = coachBranchSalaries(c);
+  if (!rows.length) {
+    showNotification('لا يوجد فرع محدد لهذا المدرب — عدّل بياناته أولاً', 'warning');
+    return;
+  }
+  const isPct = c.payType === 'percentage';
+  const body = rows
+    .map((r, i) => {
+      const paid = paidThisMonthForStaff(id, true, r.branch); // positive payouts only
+      const remaining = Math.max(0, num(r.salary) - paid);
+      const info = isPct
+        ? attRow('مصروف له من الفرع ده', paid.toLocaleString() + ' ج.م')
+        : `${attRow('المرتب', num(r.salary).toLocaleString() + ' ج.م')}
  ${attRow('مصروف هذا الشهر', paid.toLocaleString() + ' ج.م')}
- ${attRow('المتبقي', remaining.toLocaleString() + ' ج.م')}
+ ${attRow('المتبقي', remaining.toLocaleString() + ' ج.م')}`;
+      return `
+ <div style="border:1px solid rgba(48,56,65,0.12); border-radius:10px; padding:12px; margin-bottom:12px;">
+ <div style="margin-bottom:10px;">${branchBadge(r.branch)}</div>
+ <div style="display:grid; grid-template-columns:repeat(${isPct ? 1 : 3},1fr); gap:8px; margin-bottom:10px;">${info}</div>
+ <div style="display:flex; gap:8px;">
+ <input type="number" id="pay-branch-${i}" value="${isPct ? '' : remaining}" placeholder="المبلغ (ج.م)" style="flex:1;">
+ <button class="btn btn-success btn-sm" onclick="confirmCoachBranchPayment('${esc(id)}',${i})">صرف من الفرع ده</button>
  </div>
- <div class="form-group">
- <label>المبلغ المراد صرفه (ج.م)</label>
- <input type="number" id="pay-amount-input" value="${remaining}">
- </div>
- <div style="display:flex; gap:10px; margin-top:18px;">
- <button class="btn btn-success" style="flex:1;" onclick="confirmCoachPayment('${esc(id)}','مرتب')">تأكيد الصرف</button>
- <button class="btn btn-outline" style="flex:1;" onclick="closeModal()">إلغاء</button>
- </div>
- `,
+ </div>`;
+    })
+    .join('');
+
+  openModal(
+    `صرف ${isPct ? 'مستحقات' : 'مرتب'} - ${c.name}`,
+    `${isPct ? `<p style="color:rgba(48,56,65,0.6); margin-bottom:12px;">تعاقد بالنسبة (${num(c.percentageRate)}%) — اكتب المبلغ المراد صرفه يدوياً.</p>` : ''}
+ ${body}
+ <button class="btn btn-outline" style="width:100%;" onclick="closeModal()">إغلاق</button>`,
   );
+}
+
+// Books one branch's payout as an expense on that same branch.
+function confirmCoachBranchPayment(id, i) {
+  const c = data.employees.find(e => e.id === id);
+  if (!c) return;
+  const r = coachBranchSalaries(c)[i];
+  if (!r) return;
+  const amount = num(document.getElementById(`pay-branch-${i}`).value);
+  if (amount <= 0) {
+    showNotification('أدخل مبلغاً صالحاً', 'warning');
+    return;
+  }
+  recordCoachExpense(c, 'مرتب', amount, `راتب ${c.name} - ${r.branch}`, r.branch);
+  closeModal();
+  showNotification(`تم صرف ${amount.toLocaleString()} ج.م لـ ${c.name} من ${r.branch}`);
 }
 
 function payCoachAdvance(id) {
   const c = data.employees.find(e => e.id === id);
   if (!c) return;
+  const branches = coachBranches(c);
   openModal(
     `صرف سلفة - ${c.name}`,
     `
  <p style="color:rgba(48,56,65,0.6); margin-bottom:16px;">سحب مبلغ في نص الشهر (سلفة) للمدرب <strong>${esc(c.name)}</strong>.</p>
+ <div class="form-group">
+ <label>يُخصم من فرع</label>
+ <select id="pay-branch-select">${branches.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('')}</select>
+ </div>
  <div class="form-group">
  <label>مبلغ السلفة (ج.م)</label>
  <input type="number" id="pay-amount-input" placeholder="المبلغ">
@@ -3608,164 +3912,50 @@ function payCoachAdvance(id) {
   );
 }
 
-// Manual percentage payout: the user builds the collected-money list himself —
-// picking players from the coach's own groups (their total-paid pre-fills and
-// stays editable) and/or adding players by hand. The percentage is computed on
-// the sum the user assembles, so it never depends on how payments were tagged.
-let pctPayout = { coachId: null, rows: [] }; // rows: { key, name, amount }
-
-function payCoachPercentage(id) {
+// On-screen list of every player who belongs to a coach (his groups' members +
+// anyone assigned to him), with their subscription state — so you can tell at a
+// glance who's with which captain without opening the printable report.
+function viewCoachPlayers(id) {
   const c = data.employees.find(e => e.id === id);
   if (!c) return;
-  const rate = num(c.percentageRate);
-  pctPayout = { coachId: id, rows: [] };
+  const players = coachPlayers(c);
+  const rows = players.length
+    ? players
+        .map(t => {
+          const info = subInfo(t);
+          return `<tr>
+ <td><code style="color:var(--gold); font-family:monospace;">${esc(t.id)}</code></td>
+ <td><strong>${esc(t.name)}</strong></td>
+ <td>${esc(t.phone || '-')}</td>
+ <td>${esc(sportLabel(t))}</td>
+ <td>${branchBadge(t.branch)}</td>
+ <td><span class="badge ${t.status === 'نشط' ? 'badge-success' : 'badge-danger'}">${esc(t.status)}</span></td>
+ <td>${esc(info.remLabel || '-')}</td>
+ </tr>`;
+        })
+        .join('')
+    : '<tr><td colspan="7" style="text-align:center; padding:20px; color:rgba(48,56,65,0.4);">لا يوجد لاعبون لهذا المدرب</td></tr>';
 
-  // Players currently in any group led by this coach (deduped).
-  const ids = new Set();
-  (data.groups || [])
-    .filter(g => (g.trainer || '').trim() === c.name)
-    .forEach(g => (g.memberIds || []).forEach(m => ids.add(m)));
-  const groupPlayers = [...ids].map(mid => data.trainees.find(t => t.id === mid)).filter(Boolean);
-
+  const active = players.filter(t => t.status === 'نشط').length;
   openModal(
-    `صرف نسبة - ${c.name}`,
+    `لاعبين الكابتن ${c.name}`,
     `
- <p style="color:rgba(48,56,65,0.6); margin-bottom:12px;">النسبة المتفق عليها: <strong>${rate}%</strong></p>
- <div class="form-group">
- <label>أضف لاعب من جروب الكابتن</label>
- <div style="display:flex; gap:8px;">
- <select id="pct-group-select" style="flex:1;">
- <option value="">${groupPlayers.length ? '— اختر لاعب —' : 'لا يوجد لاعبون في جروبات الكابتن'}</option>
- ${groupPlayers.map(t => `<option value="${esc(t.id)}">${esc(t.name)} — دفع ${totalPaidByPlayer(t).toLocaleString()} ج.م</option>`).join('')}
- </select>
- <button class="btn btn-outline btn-sm" onclick="addPctFromGroup('${esc(id)}')">➕ أضف</button>
+ <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:14px;">
+ ${attRow('إجمالي اللاعبين', String(players.length))}
+ ${attRow('نشط', String(active))}
+ ${attRow('الفروع', coachBranches(c).join('، ') || '—')}
  </div>
- </div>
- <div class="form-group">
- <label>أو أضف لاعب يدوياً</label>
- <div style="display:flex; gap:8px;">
- <input type="text" id="pct-manual-name" placeholder="اسم اللاعب" style="flex:1;">
- <input type="number" id="pct-manual-amount" placeholder="دفع كام" style="width:120px;">
- <button class="btn btn-outline btn-sm" onclick="addPctManual('${esc(id)}')">➕</button>
- </div>
- </div>
- <div id="pct-rows"></div>
- <div style="display:flex; gap:10px; margin-top:16px;">
- <button class="btn btn-success" style="flex:1;" onclick="confirmPctPayout('${esc(id)}')">تأكيد الصرف</button>
- <button class="btn btn-outline" style="flex:1;" onclick="closeModal()">إلغاء</button>
- </div>
- `,
-  );
-  renderPctRows(id);
-}
-
-// Adds the player chosen from the group dropdown, pre-filling their total paid.
-function addPctFromGroup(id) {
-  const sel = document.getElementById('pct-group-select');
-  const tid = sel && sel.value;
-  if (!tid) return;
-  const t = data.trainees.find(x => x.id === tid);
-  if (!t) return;
-  if (pctPayout.rows.some(r => r.key === tid)) {
-    showNotification('اللاعب مضاف بالفعل', 'warning');
-    return;
-  }
-  pctPayout.rows.push({ key: tid, name: t.name, amount: totalPaidByPlayer(t) });
-  if (sel) sel.value = '';
-  renderPctRows(id);
-}
-
-// Adds a hand-typed player + amount.
-function addPctManual(id) {
-  const nameEl = document.getElementById('pct-manual-name');
-  const amtEl = document.getElementById('pct-manual-amount');
-  const name = (nameEl.value || '').trim();
-  const amount = num(amtEl.value);
-  if (!name) {
-    showNotification('اكتب اسم اللاعب', 'warning');
-    return;
-  }
-  pctPayout.rows.push({ key: 'm-' + Date.now(), name, amount });
-  nameEl.value = '';
-  amtEl.value = '';
-  renderPctRows(id);
-}
-
-function removePctRow(id, key) {
-  pctPayout.rows = pctPayout.rows.filter(r => r.key !== key);
-  renderPctRows(id);
-}
-
-// Editing an amount inline: update state + totals only (keeps input focus).
-function updatePctAmount(id, key, value) {
-  const r = pctPayout.rows.find(x => x.key === key);
-  if (r) r.amount = num(value);
-  updatePctTotals(id);
-}
-
-function renderPctRows(id) {
-  const box = document.getElementById('pct-rows');
-  if (!box) return;
-  const rows = pctPayout.rows;
-  box.innerHTML = `
- <div style="max-height:200px; overflow-y:auto; border:1px solid rgba(48,56,65,0.12); border-radius:8px;">
- <table style="width:100%; border-collapse:collapse; font-size:13px;">
- <thead><tr style="background:rgba(48,56,65,0.05);">
- <th style="padding:6px 10px; text-align:right;">اللاعب</th>
- <th style="padding:6px 10px;">دفع (ج.م)</th>
- <th style="padding:6px 10px; width:40px;"></th>
- </tr></thead>
- <tbody>
- ${
-   rows.length
-     ? rows
-         .map(
-           r => `<tr style="border-bottom:1px solid rgba(48,56,65,0.08);">
- <td style="padding:5px 10px;">${esc(r.name)}</td>
- <td style="padding:5px 10px;"><input type="number" value="${r.amount}" oninput="updatePctAmount('${esc(id)}','${esc(r.key)}', this.value)" style="width:110px;"></td>
- <td style="padding:5px 10px;"><button class="btn btn-danger btn-sm" onclick="removePctRow('${esc(id)}','${esc(r.key)}')">✕</button></td>
- </tr>`,
-         )
-         .join('')
-     : '<tr><td colspan="3" style="padding:14px; text-align:center; color:rgba(48,56,65,0.4);">لم تُضف أي لاعبين بعد</td></tr>'
- }
- </tbody>
+ <div class="table-container" style="max-height:340px; overflow:auto;">
+ <table style="width:100%;">
+ <thead><tr><th>الكود</th><th>الاسم</th><th>الهاتف</th><th>الرياضة</th><th>الفرع</th><th>الحالة</th><th>المتبقي</th></tr></thead>
+ <tbody>${rows}</tbody>
  </table>
  </div>
- <div id="pct-totals" style="margin-top:12px;"></div>`;
-  updatePctTotals(id);
+ <button class="btn btn-outline" style="width:100%; margin-top:14px;" onclick="closeModal()">إغلاق</button>`,
+  );
 }
 
-function updatePctTotals(id) {
-  const el = document.getElementById('pct-totals');
-  if (!el) return;
-  const c = data.employees.find(e => e.id === id);
-  const rate = c ? num(c.percentageRate) : 0;
-  const total = pctPayout.rows.reduce((s, r) => s + num(r.amount), 0);
-  const due = Math.round((total * rate) / 100);
-  el.innerHTML = `
- <div style="display:flex; justify-content:space-between; font-weight:700;"><span>إجمالي المحصّل (${pctPayout.rows.length} لاعب):</span><span>${total.toLocaleString()} ج.م</span></div>
- <div style="display:flex; justify-content:space-between; font-weight:800; color:var(--success); font-size:18px; margin-top:6px;"><span>النسبة المستحقة (${rate}%):</span><span>${due.toLocaleString()} ج.م</span></div>`;
-}
-
-function confirmPctPayout(id) {
-  const c = data.employees.find(e => e.id === id);
-  if (!c) return;
-  const total = pctPayout.rows.reduce((s, r) => s + num(r.amount), 0);
-  if (total <= 0) {
-    showNotification('أضف لاعبين بمبالغ صحيحة أولاً', 'warning');
-    return;
-  }
-  const rate = num(c.percentageRate);
-  const amount = Math.round((total * rate) / 100);
-  const desc = `نسبة ${rate}% من ${total.toLocaleString()} (${pctPayout.rows.length} لاعب) - ${c.name}`;
-  recordCoachExpense(c, 'نسبة', amount, desc);
-  closeModal();
-  showNotification(`تم صرف ${amount.toLocaleString()} ج.م لـ ${c.name}`);
-}
-
-// Confirm handler for the salary & advance payouts (percentage has its own
-// manual flow — see confirmPctPayout).
+// Confirm handler for the salary & advance payouts.
 function confirmCoachPayment(id, type) {
   const c = data.employees.find(e => e.id === id);
   if (!c) return;
@@ -3774,8 +3964,11 @@ function confirmCoachPayment(id, type) {
     showNotification('أدخل مبلغاً صالحاً', 'warning');
     return;
   }
-  const desc = type === 'سلفة' ? `سلفة - ${c.name}` : `راتب ${c.name}`;
-  recordCoachExpense(c, type, amount, desc);
+  // Which branch bears the cost (the advance modal offers a picker).
+  const sel = document.getElementById('pay-branch-select');
+  const branch = (sel && sel.value) || c.branch;
+  const desc = type === 'سلفة' ? `سلفة - ${c.name}${branch ? ' - ' + branch : ''}` : `راتب ${c.name}`;
+  recordCoachExpense(c, type, amount, desc, branch);
   closeModal();
   showNotification(`تم صرف ${amount.toLocaleString()} ج.م لـ ${c.name}`);
 }
@@ -3783,6 +3976,9 @@ function confirmCoachPayment(id, type) {
 function editCoach(id) {
   const c = data.employees.find(e => e.id === id);
   if (!c) return;
+  // Seed the branch+salary editor from the coach's current rows.
+  coachBranchState.edit = coachBranchSalaries(c).map(r => ({ branch: r.branch, salary: r.salary }));
+  if (!coachBranchState.edit.length) coachBranchState.edit = [{ branch: '', salary: '' }];
   openModal(
     `تعديل المدرب ${c.name}`,
     `
@@ -3790,17 +3986,13 @@ function editCoach(id) {
  <div class="form-group"><label>الاسم</label><input type="text" id="edit-coach-name" value="${esc(c.name)}"></div>
  <div class="form-group"><label>الهاتف</label><input type="tel" id="edit-coach-phone" value="${esc(c.phone || '')}"></div>
  <div class="form-group"><label>التخصص</label><select id="edit-coach-specialty">${sportOptionsHTML(c.specialty || '')}${c.specialty && !SPORTS.includes(c.specialty) ? `<option value="${esc(c.specialty)}" selected>${esc(c.specialty)}</option>` : ''}</select></div>
- <div class="form-group"><label>الفرع</label>
- <select id="edit-coach-branch">${branchOptionsHTML(c.branch)}</select>
- </div>
  <div class="form-group"><label>نوع التعاقد</label>
  <select id="edit-coach-pay-type" onchange="toggleEditCoachPayType()">
  <option value="monthly" ${c.payType !== 'percentage' ? 'selected' : ''}>راتب شهري</option>
- <option value="percentage" ${c.payType === 'percentage' ? 'selected' : ''}>نسبة</option>
+ <option value="percentage" ${c.payType === 'percentage' ? 'selected' : ''}>نسبة (صرف يدوي)</option>
  </select>
  </div>
- <div class="form-group" id="edit-coach-salary-group" style="display:${c.payType === 'percentage' ? 'none' : 'flex'};"><label>الراتب الشهري</label><input type="number" id="edit-coach-salary" value="${num(c.salary)}"></div>
- <div class="form-group" id="edit-coach-rate-group" style="display:${c.payType === 'percentage' ? 'flex' : 'none'};"><label>النسبة (%)</label><input type="number" id="edit-coach-rate" value="${num(c.percentageRate)}"></div>
+ <div class="form-group" id="edit-coach-rate-group" style="display:${c.payType === 'percentage' ? 'flex' : 'none'};"><label>النسبة (%) — للعلم فقط</label><input type="number" id="edit-coach-rate" value="${num(c.percentageRate)}"></div>
  <div class="form-group"><label>جروبات المدرب (الأسماء الجديدة تُنشأ تلقائياً)</label><input type="text" id="edit-coach-groups" value="${esc(
    (data.groups || [])
      .filter(g => g.trainer === c.name)
@@ -3808,14 +4000,18 @@ function editCoach(id) {
      .join('، '),
  )}" placeholder="أسماء مفصولة بفاصلة"></div>
  </div>
+ <div class="form-group" style="margin-top:6px;">
+ <label>الفروع والمرتبات (فرع أو أكتر — كل فرع بمرتبه)</label>
+ <div id="edit-coach-branch-rows"></div>
+ </div>
  <button class="btn btn-primary" style="margin-top:20px; width:100%;" onclick="saveCoachEdit('${esc(c.id)}')">حفظ التعديلات</button>
  `,
   );
+  renderCoachBranchRows('edit');
 }
 
 function toggleEditCoachPayType() {
   const type = document.getElementById('edit-coach-pay-type').value;
-  document.getElementById('edit-coach-salary-group').style.display = type === 'monthly' ? 'flex' : 'none';
   document.getElementById('edit-coach-rate-group').style.display = type === 'percentage' ? 'flex' : 'none';
 }
 
@@ -3826,9 +4022,15 @@ function saveCoachEdit(id) {
   c.name = document.getElementById('edit-coach-name').value.trim() || c.name;
   c.phone = document.getElementById('edit-coach-phone').value.trim();
   c.specialty = document.getElementById('edit-coach-specialty').value.trim();
-  c.branch = document.getElementById('edit-coach-branch').value;
+  const rows = collectCoachBranchRows('edit');
+  if (!rows.length) {
+    showNotification('أضف فرعاً واحداً على الأقل', 'warning');
+    return;
+  }
+  c.branchSalaries = rows;
+  c.branch = rows[0].branch; // primary branch, kept for legacy readers
   c.payType = document.getElementById('edit-coach-pay-type').value;
-  c.salary = c.payType === 'monthly' ? num(document.getElementById('edit-coach-salary').value) : 0;
+  c.salary = c.payType === 'monthly' ? rows.reduce((s, r) => s + num(r.salary), 0) : 0;
   c.percentageRate = c.payType === 'percentage' ? num(document.getElementById('edit-coach-rate').value) : 0;
   dbSetDoc(employeesCol, c.id, c);
 
@@ -4002,8 +4204,11 @@ const WEEK_DAYS = [
   { d: 5, l: 'الجمعة' },
 ];
 
+// Coaches who work in a branch — matches ANY of the coach's branches, so a
+// multi-branch coach shows up in every branch he actually works in (not just
+// his primary one).
 function branchCoaches(branch) {
-  return getCoaches().filter(c => (c.branch || '') === branch);
+  return getCoaches().filter(c => coachBranches(c).includes(branch));
 }
 
 function renderCoachSchedule(branch) {
@@ -4051,7 +4256,8 @@ function saveCoachSchedule(id) {
   const timeEl = document.getElementById(`sched-time-${id}`);
   c.schedTime = timeEl ? timeEl.value : '';
   dbSetDoc(employeesCol, c.id, c);
-  renderCoachSchedule(c.branch || val('session-branch-filter'));
+  // Stay on the branch the user is viewing (a coach can belong to several).
+  renderCoachSchedule(val('session-branch-filter') || c.branch);
   showNotification(`تم حفظ جدول ${c.name} (${(c.schedDays || []).length} يوم في الأسبوع)`);
 }
 
@@ -4524,10 +4730,9 @@ function recordStaffByCode() {
   document.getElementById('staff-code').value = '';
 }
 
-// Prints a STAFF card in the same style as the players' cards but DARKER (deep
-// navy + deep-gold accent), so staff cards read as a darker variant of the
-// brand card. The staff code is a QR — scanning it into the "staff-code" box
-// clocks the employee in (first scan) / out (second scan).
+// Prints a STAFF card in the EXACT same portrait design/size as the players'
+// cards (30x60mm, dark-gold front + white barcode back). Scanning the barcode
+// into the "staff-code" box clocks the employee in (first scan) / out (second).
 function printStaffCard(empId) {
   const e = (data.employees || []).find(x => x.id === empId);
   if (!e) return;
@@ -4537,84 +4742,11 @@ function printStaffCard(empId) {
     showNotification('لا يوجد كود لهذا الموظف (يحتاج صلاحية مدير)', 'warning');
     return;
   }
-  const color = '#C9A227'; // deep gold accent (darker than the players' gold)
   const logoUrl = new URL('src/logo-after.png', location.href).href;
-  const qrUrl = new URL('vendor/qrcode.min.js', location.href).href;
-  const win = window.open('', '_blank');
-  if (!win) {
-    showNotification('فعّل السماح بالنوافذ المنبثقة لطباعة الكرت', 'warning');
-    return;
-  }
-  win.document.write(`
- <html dir="rtl" lang="ar"><head><title>بطاقة موظف - ${esc(e.name)}</title>
- <meta charset="UTF-8">
- <script src="${qrUrl}"><\/script>
- <style>
- @page { size: 90mm 56mm; margin: 0; }
- * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
- html, body { margin: 0; padding: 0; background: #ffffff; }
- /* Staff card = the players' brand card, but a DARKER navy + deep-gold accent. */
- .scard {
- position: relative; width: 90mm; height: 56mm; overflow: hidden;
- background:
- radial-gradient(60mm 40mm at 88% 8%, ${color}26, transparent 60%),
- linear-gradient(135deg, #0E141C 0%, #161D2B 60%, #090C12 100%);
- border-radius: 8px; padding: 4.5mm 5mm;
- display: flex; flex-direction: column; justify-content: space-between; color: #E9EDF3;
- }
- .scard::before { content: ''; position: absolute; inset: 1.1mm; border: 0.5mm solid ${color}; border-radius: 6px; pointer-events: none; }
- .scard::after { content: ''; position: absolute; top: 0; right: 0; left: 0; height: 1.6mm; background: ${color}; }
- .s-top { display: flex; justify-content: space-between; align-items: center; z-index: 1; }
- .club-name { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 1px; }
- .club-name span { color: ${color}; }
- .club-sub { font-size: 8px; letter-spacing: 2px; color: ${color}; margin-top: 1.5mm; font-weight: 700; }
- .s-logo { height: 12mm; width: auto; }
- .s-divider { height: 0.3mm; background: linear-gradient(90deg, transparent, ${color}, transparent); margin: 1mm 0; z-index: 1; }
- .s-body { display: flex; justify-content: space-between; align-items: center; gap: 4mm; z-index: 1; }
- .s-info { flex: 1; min-width: 0; }
- .lbl { font-size: 6.5px; letter-spacing: 1px; color: rgba(233,237,243,0.5); text-transform: uppercase; }
- .s-name { font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 1mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
- .s-role { font-size: 9px; color: ${color}; font-weight: 600; margin-bottom: 1.5mm; }
- .s-code { font-size: 13px; font-family: 'Courier New', monospace; letter-spacing: 1px; color: #E9EDF3; font-weight: 700; }
- .s-qr { background: #fff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm ${color}; }
- .s-footer { font-size: 6.5px; color: ${color}; text-align: center; letter-spacing: 0.5px; z-index: 1; }
- </style>
- </head>
- <body>
- <div class="scard">
- <div class="s-top">
- <div class="scard-brand">
- <div class="club-name">El Wasl <span>Academy</span></div>
- <div class="club-sub">بطاقة موظف</div>
- </div>
- <img class="s-logo" src="${logoUrl}" alt="" onerror="this.style.display='none'">
- </div>
- <div class="s-divider"></div>
- <div class="s-body">
- <div class="s-info">
- <div class="lbl">الاسم</div>
- <div class="s-name">${esc(e.name)}</div>
- <div class="s-role">${esc(e.role || '-')} • ${esc(e.branch || 'غير محدد')}</div>
- <div class="lbl">الكود</div>
- <div class="s-code">${esc(code)}</div>
- </div>
- <div class="s-qr"><div id="qrcode"></div></div>
- </div>
- <div class="s-footer">امسح الكود لتسجيل الحضور والانصراف</div>
- </div>
- <script>
- window.onload = function() {
- function render() {
- if (window.QRCode) { new QRCode(document.getElementById("qrcode"), { text: "${esc(code)}", width: 92, height: 92, colorDark: "#0E141C", colorLight: "#ffffff" }); }
- setTimeout(function() { window.print(); }, 350);
- }
- if (window.QRCode) { render(); }
- else { var s = document.createElement('script'); s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload = render; s.onerror = render; document.head.appendChild(s); }
- };
- <\/script>
- </body></html>
- `);
-  win.document.close();
+  const faces =
+    staffCardFrontHTML(e, code, logoUrl, 'page-break-after: always;') +
+    cardBackHTML(code, logoUrl, 'page-break-after: always;');
+  openPortraitCardPages(`بطاقة موظف - ${e.name}`, faces);
 }
 
 // Daily PDF: one page per branch, listing each staff member's check-in/out.
@@ -4651,7 +4783,6 @@ function updateDashboard() {
   const players = data.trainees.filter(t => t.type !== 'test');
   const total = players.length;
   const active = players.filter(t => t.status === 'نشط').length;
-  const totalSubs = players.filter(t => t.type === 'subscription').length;
   // (5) Total revenue comes from the running aggregate (meta/stats) so the
   // dashboard never has to read every payment. When the full history is
   // loaded (reports view) we sum it directly for an exact figure.
@@ -4659,8 +4790,9 @@ function updateDashboard() {
 
   document.getElementById('dash-total').textContent = total;
   document.getElementById('dash-active').textContent = active;
-  document.getElementById('dash-subs').textContent = totalSubs;
   document.getElementById('dash-revenue').textContent = revenue.toLocaleString();
+  // The المصروفات / صافي الربح cards are filled by filterBranchDashboard()
+  // (called at the end of this function) using the same branch + period scope.
 
   // Expiry alerts
   const expiring = data.trainees
@@ -4715,7 +4847,7 @@ function updateDashboard() {
  </div>
  <div style="display:flex; align-items:center; gap:8px;">
  <span class="badge badge-danger">غائب منذ ${info.days} يوم</span>
- <button class="btn btn-outline btn-sm" onclick="viewTrainee(${data.trainees.indexOf(t)})">عرض</button>
+ <button class="btn btn-outline btn-sm" onclick="viewTrainee('${esc(t.id)}')">عرض</button>
  </div>
  </div>`;
       })
@@ -4822,8 +4954,11 @@ function onDashMonthChange() {
   const el = document.getElementById('dash-month');
   const v = el ? el.value : ''; // "YYYY-MM"
   if (!v) {
+    // Cleared: fall back to the active period button (and reload its window if
+    // the month we were showing replaced the payments in memory).
     dashMonthBounds = null;
-    filterBranchDashboard();
+    markPeriodButtons('dash', dashPeriod);
+    loadDashSelection();
     return;
   }
   const [y, m] = v.split('-').map(Number);
@@ -4833,7 +4968,7 @@ function onDashMonthChange() {
   };
   // Un-highlight the period buttons — a specific month is active now.
   markPeriodButtons('dash', '');
-  loadHistoryRange(dashMonthBounds.from, dashMonthBounds.to).then(filterBranchDashboard);
+  loadDashSelection();
 }
 
 // [from, to] timestamps of a calendar-month period (null = no period filter).
@@ -4869,15 +5004,33 @@ function setDashPeriod(period) {
   const mEl = document.getElementById('dash-month');
   if (mEl) mEl.value = '';
   markPeriodButtons('dash', period);
-  const bounds = periodBounds(period);
-  if (bounds) {
-    loadHistoryRange(bounds.from, bounds.to).then(filterBranchDashboard);
-  } else if (!historyFullyLoaded) {
+  loadDashSelection();
+}
+
+// Loads whatever the current dashboard selection (period button or month) needs,
+// then renders — but ONLY if it's still the latest selection when the data
+// arrives. Without this guard a slow, older load resolving late could overwrite
+// the newer selection's figures with stale ones (or a zero mid-load), which is
+// why the numbers sometimes needed a back-and-forth toggle to appear. When the
+// full history is already in memory, every period is filtered instantly with no
+// extra load.
+let dashSelectionGen = 0;
+function loadDashSelection() {
+  const token = ++dashSelectionGen;
+  const render = () => {
+    if (token === dashSelectionGen) filterBranchDashboard();
+  };
+  const bounds = dashMonthBounds || periodBounds(dashPeriod);
+  if (historyFullyLoaded) {
+    // All records already loaded — filter in memory, instant, no race.
+    render();
+  } else if (bounds) {
+    // A month/period window: fetch just those records, then render.
+    loadHistoryRange(bounds.from, bounds.to).then(render);
+  } else {
     // "كل الفترة": totals are exact from the SQL aggregates; load the full
     // history so the transactions table shows every record too.
-    loadAllHistory().then(filterBranchDashboard);
-  } else {
-    filterBranchDashboard();
+    loadAllHistory().then(render);
   }
 }
 
@@ -4927,6 +5080,16 @@ function filterBranchDashboard() {
   if (incEl) incEl.textContent = `${totalIncome.toLocaleString()} ج.م`;
   if (expEl) expEl.textContent = `${totalExpenses.toLocaleString()} ج.م`;
   if (profEl) profEl.textContent = `${profit.toLocaleString()} ج.م`;
+
+  // Top KPI cards: المصروفات + صافي الربح (same branch/period scope as above).
+  // Net profit is flagged red when it's a loss, neutral otherwise.
+  const dashExp = document.getElementById('dash-expenses');
+  if (dashExp) dashExp.textContent = totalExpenses.toLocaleString();
+  const dashNet = document.getElementById('dash-net-profit');
+  if (dashNet) {
+    dashNet.textContent = profit.toLocaleString();
+    dashNet.style.color = profit < 0 ? 'var(--danger)' : '';
+  }
 
   // The red revenue card follows the selected branch + period, and can be
   // narrowed to ONE revenue type via #dash-revenue-cat (else all revenue).
@@ -5291,12 +5454,32 @@ function cardPrefix(branch, sport, sector) {
 // Generates `n` full card codes for a print run: BRANCH-SPORT[-SECTOR]-NUMBER.
 // The NUMBER is drawn from the sport's own thousand-block (see generateSportCodes),
 // so every card of a sport stays inside its block regardless of branch/age/sector.
-function generateStructuredCodes(branch, sport, sector, n) {
+async function generateStructuredCodes(branch, sport, sector, n) {
   const prefix = cardPrefix(branch, sport, sector);
   if (!prefix) return null;
-  const nums = generateSportCodes(sport, n);
+  const nums = await generateSportCodes(sport, n);
   if (!nums) return null;
   return nums.map(num => `${prefix}-${num}`);
+}
+
+// Atomically reserves `count` serials from the CENTRAL counter (Supabase RPC),
+// so two devices printing cards for the same sport can never share numbers.
+// `localMin` seeds the counter past any serials printed before it existed.
+// Returns the first serial of the reserved block, or null (offline / RPC not
+// installed yet) — the caller then falls back to the local high-water method.
+async function reserveSerialsFromServer(key, count, localMin) {
+  if (!navigator.onLine) return null;
+  try {
+    const { data: start, error } = await sb.rpc('reserve_card_serials', {
+      p_key: key,
+      p_count: count,
+      p_min: localMin,
+    });
+    if (error || start == null) return null;
+    return Number(start);
+  } catch (e) {
+    return null;
+  }
 }
 
 // Generates `n` sequential card numbers for a sport, continuing after the
@@ -5344,14 +5527,19 @@ function usedReserveSerials() {
   );
   return used;
 }
-function generateSportCodes(sport, n) {
+async function generateSportCodes(sport, n) {
   const base = sportCardBase(sport);
   if (base == null) return null; // no code for this sport
   const blockEnd = base + 999;
   const usedInBlock = usedSerialsForSport(sport, base, blockEnd);
   const hwKey = `card-serial-${base}`;
   const hw = parseInt(localStorage.getItem(hwKey) || '0', 10);
-  let next = Math.max(base - 1, hw, ...usedInBlock) + 1;
+  const localHigh = Math.max(base - 1, hw, ...usedInBlock);
+
+  // Prefer the CENTRAL counter (atomic, cross-device). Offline or before the
+  // SQL function is installed, fall back to the local high-water method.
+  const serverStart = await reserveSerialsFromServer(`block-${base}`, n, localHigh);
+  let next = serverStart != null ? serverStart : localHigh + 1;
 
   const codes = [];
   while (codes.length < n && next <= blockEnd) {
@@ -5361,9 +5549,18 @@ function generateSportCodes(sport, n) {
   localStorage.setItem(hwKey, String(Math.min(next - 1, blockEnd)));
 
   if (codes.length < n) {
+    // Block exhausted — the rest come from the shared reserve pool (also
+    // centrally reserved when possible).
     const rKey = 'card-serial-reserve';
     const usedReserve = usedReserveSerials();
-    let r = Math.max(CARD_OVERFLOW_BASE - 1, parseInt(localStorage.getItem(rKey) || '0', 10), ...usedReserve);
+    const localReserveHigh = Math.max(
+      CARD_OVERFLOW_BASE - 1,
+      parseInt(localStorage.getItem(rKey) || '0', 10),
+      ...usedReserve,
+    );
+    const need = n - codes.length;
+    const rStart = await reserveSerialsFromServer('reserve-pool', need, localReserveHigh);
+    let r = rStart != null ? rStart - 1 : localReserveHigh;
     while (codes.length < n) {
       r++;
       codes.push(String(r));
@@ -5375,10 +5572,10 @@ function generateSportCodes(sport, n) {
 
 // Prints branded blank cards for one (branch + sport + age band [+ gym sector]):
 // each card carries a structured sequential code (BRANCH-SPORT[-SECTOR]-####)
-// that encodes everything, plus a QR of that code and the sport's own colour.
-// Laid out 8 per A4 page (2×4). You write the player's name by hand, then enter
-// the card's code in "كود البطاقة" when you register that player.
-function printBlankCards() {
+// that encodes everything, plus a barcode of that code and the sport's colour.
+// Each face is its own card-sized 30x60mm page. You write the player's name by
+// hand, then enter the card's code in "كود البطاقة" when you register them.
+async function printBlankCards() {
   const branch = val('blank-cards-branch');
   const sport = val('blank-cards-sport');
   const sector = val('blank-cards-sector');
@@ -5407,8 +5604,24 @@ function printBlankCards() {
     return;
   }
 
-  const codes = generateStructuredCodes(branch, sport, sector, qty);
+  // Open the print window NOW, in the click's own tick — the serial
+  // reservation below awaits the server, and window.open after an async gap
+  // gets eaten by the popup blocker on slow connections.
+  const win = window.open('', '_blank');
+  if (!win) {
+    showNotification('فعّل السماح بالنوافذ المنبثقة لطباعة الكروت', 'warning');
+    return;
+  }
+  win.document.write(
+    '<html dir="rtl"><body style="font-family:Arial;padding:30px;">جارٍ حجز أرقام الكروت...</body></html>',
+  );
+  // Close the placeholder document so the real write() below REPLACES it
+  // (write on a still-open document would append instead).
+  win.document.close();
+
+  const codes = await generateStructuredCodes(branch, sport, sector, qty);
   if (!codes) {
+    win.close();
     showNotification('تعذّر تكوين كود الكرت — تحقق من الاختيارات', 'danger');
     return;
   }
@@ -5417,13 +5630,188 @@ function printBlankCards() {
   // structured code by cardFrontHTML (via sportForCode), so blank cards use the
   // exact same new portrait design (front data + white barcode back) as players.
   const pseudo = { branch };
-  const slots = [];
-  codes.forEach(code => {
-    slots.push(`<div class="slot">${cardFrontHTML(pseudo, code, logoUrl, '')}</div>`);
-    slots.push(`<div class="slot">${cardBackHTML(code, logoUrl, '')}</div>`);
-  });
+  // Each face on its own card-sized 30x60mm page (front, back per card).
+  const faces = codes
+    .map(
+      code =>
+        cardFrontHTML(pseudo, code, logoUrl, 'page-break-after: always;') +
+        cardBackHTML(code, logoUrl, 'page-break-after: always;'),
+    )
+    .join('');
   const groupText = isGymSport(sport) ? `${sport} • ${sector}` : sport;
-  openPortraitCardsSheet(`كروت ${groupText} - ${branch} (${qty})`, slots.join(''));
+  openPortraitCardPages(`كروت ${groupText} - ${branch} (${qty})`, faces, win);
+}
+
+// ==================== MIGRATE LEGACY PLAYERS TO STRUCTURED CODES ====================
+// Old players were registered with random "Wasl-####" ids. This tool gives each
+// a printable structured code (BRANCH-SPORT[-SECTOR]-NUMBER) WITHOUT changing the
+// player's id — so every attendance/payment/group link stays intact and old
+// printed cards keep scanning (via the id + legacyCodes). Reprinting a migrated
+// player now shows only the new, consistent code.
+
+// True if a code already follows the structured format (2nd segment is a known
+// sport abbreviation), e.g. "A-KA-3001" or "B-WAG-T-1001".
+function isStructuredCode(c) {
+  const seg = String(c || '')
+    .trim()
+    .split('-');
+  return seg.length >= 3 && Object.values(SPORT_CODES).includes(seg[1]);
+}
+
+// The gym sector NAME (فريق/تجهيزي/مدارس) for a player, read from their stored
+// level ("قطاع فريق" ...). null when it can't be determined.
+function gymSectorName(t) {
+  const lvl = (t.level || '').trim();
+  return GYM_SECTORS.find(name => lvl.includes(name)) || null;
+}
+
+// Read-only: works out which (player, sport) pairs still need a structured code,
+// and why others are skipped. Reserves nothing — safe to call for the preview.
+function buildCodeMigrationPlan() {
+  const jobs = []; // { t, sport, sectorName }
+  const skipped = []; // { name, reason }
+  (data.trainees || []).forEach(t => {
+    if (t.type === 'test') return; // trial players print in their own flow
+    const existing = (t.codes || []).filter(isStructuredCode);
+    const coveredAb = new Set(existing.map(c => c.split('-')[1]));
+    traineeSports(t).forEach(sport => {
+      const ab = SPORT_CODES[sport];
+      if (!ab) return skipped.push({ name: t.name, reason: `رياضة بدون كود: ${sport}` });
+      if (coveredAb.has(ab)) return; // already has a structured code for this sport
+      if (!BRANCH_CODES[t.branch]) return skipped.push({ name: t.name, reason: `فرع بدون كود: ${t.branch || '—'}` });
+      let sectorName = null;
+      if (isGymSport(sport)) {
+        sectorName = gymSectorName(t);
+        if (!sectorName) return skipped.push({ name: t.name, reason: `جمباز بدون قطاع محدد` });
+      }
+      jobs.push({ t, sport, sectorName });
+    });
+  });
+  return { jobs, skipped };
+}
+
+let _codeMigrationPlan = null;
+
+// Shows a summary of what the migration will do, then a confirm button. No data
+// is written until the user confirms.
+function previewCodeMigration() {
+  if (currentRole !== 'admin') {
+    showNotification('هذه الأداة متاحة للمدير فقط', 'danger');
+    return;
+  }
+  const plan = buildCodeMigrationPlan();
+  _codeMigrationPlan = plan;
+  const players = new Set(plan.jobs.map(j => j.t));
+
+  if (plan.jobs.length === 0) {
+    openModal(
+      'توحيد أكواد اللاعبين',
+      `<p style="line-height:1.9;">لا يوجد لاعبون بحاجة لكود جديد — كلهم إمّا لديهم كود منظّم بالفعل${
+        plan.skipped.length ? ` أو تعذّر توليد كود لهم (${plan.skipped.length}).` : '.'
+      }</p>
+      ${plan.skipped.length ? `<button class="btn btn-outline" style="margin-top:12px;" onclick="showCodeMigrationSkipped()">عرض المتخطَّين (${plan.skipped.length})</button>` : ''}`,
+    );
+    return;
+  }
+
+  // Per-sport counts (how many new codes each sport's block will consume).
+  const bySport = {};
+  plan.jobs.forEach(j => (bySport[j.sport] = (bySport[j.sport] || 0) + 1));
+  const sportRows = Object.entries(bySport)
+    .sort((a, b) => b[1] - a[1])
+    .map(([sp, n]) => `<tr><td>${esc(sp)}</td><td style="text-align:center;">${n}</td></tr>`)
+    .join('');
+
+  openModal(
+    'توحيد أكواد اللاعبين (للطباعة)',
+    `
+    <p style="line-height:1.9; margin-bottom:10px;">
+      سيتم إعطاء <strong>${players.size}</strong> لاعب كوداً منظّماً جديداً بالشكل
+      <code>الفرع-الرياضة-الرقم</code> (إجمالي <strong>${plan.jobs.length}</strong> كود، لاعب متعدد الرياضات يأخذ كوداً لكل رياضة).
+    </p>
+    <div style="background:rgba(48,56,65,0.04); border-radius:10px; padding:10px 14px; margin-bottom:12px; line-height:1.9;">
+      ✅ الكود القديم يفضل كمرجع داخلي — <strong>كل الحضور والمدفوعات والجروبات تبقى مربوطة</strong>.<br>
+      ✅ الكروت المطبوعة القديمة <strong>تفضل تشتغل عند المسح</strong>.<br>
+      ✅ عند إعادة الطباعة يظهر الكود الجديد فقط.
+    </div>
+    <table style="width:100%; border-collapse:collapse;">
+      <thead><tr><th style="text-align:right;">الرياضة</th><th>عدد الأكواد</th></tr></thead>
+      <tbody>${sportRows}</tbody>
+    </table>
+    ${
+      plan.skipped.length
+        ? `<p style="color:var(--warning); margin-top:12px;">⚠️ ${plan.skipped.length} حالة سيتم تخطّيها (فرع/رياضة بدون كود، أو جمباز بدون قطاع).
+           <button class="btn btn-outline btn-sm" onclick="showCodeMigrationSkipped()">عرض التفاصيل</button></p>`
+        : ''
+    }
+    <div style="display:flex; gap:10px; margin-top:18px;">
+      <button class="btn btn-success" style="flex:1;" onclick="applyCodeMigration(this)">تأكيد وتوليد الأكواد</button>
+      <button class="btn btn-outline" style="flex:1;" onclick="closeModal()">إلغاء</button>
+    </div>`,
+  );
+}
+
+function showCodeMigrationSkipped() {
+  const plan = _codeMigrationPlan || buildCodeMigrationPlan();
+  const rows =
+    plan.skipped.map(s => `<tr><td>${esc(s.name || '—')}</td><td>${esc(s.reason)}</td></tr>`).join('') ||
+    '<tr><td colspan="2" style="text-align:center;">لا يوجد</td></tr>';
+  openModal(
+    `الحالات المتخطَّاة (${plan.skipped.length})`,
+    `<div class="table-container"><table style="width:100%;">
+      <thead><tr><th>اللاعب</th><th>السبب</th></tr></thead><tbody>${rows}</tbody></table></div>
+     <button class="btn btn-outline" style="margin-top:14px; width:100%;" onclick="previewCodeMigration()">رجوع</button>`,
+  );
+}
+
+// Reserves the serials (atomically, per sport) and writes the new codes. The old
+// code is preserved as the id AND pushed into legacyCodes so it stays scannable.
+async function applyCodeMigration(btn) {
+  if (currentRole !== 'admin') return;
+  const plan = _codeMigrationPlan || buildCodeMigrationPlan();
+  if (!plan.jobs.length) return closeModal();
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'جارٍ توليد الأكواد...';
+  }
+
+  // Reserve numbers per sport (the block is shared across branches/sectors).
+  const bySport = {};
+  plan.jobs.forEach(j => (bySport[j.sport] = bySport[j.sport] || []).push(j));
+  for (const sport of Object.keys(bySport)) {
+    const group = bySport[sport];
+    const nums = await generateSportCodes(sport, group.length);
+    if (!nums || nums.length < group.length) continue; // couldn't reserve — leave those unassigned
+    group.forEach((j, i) => {
+      const prefix = cardPrefix(j.t.branch, sport, j.sectorName);
+      if (prefix) j.code = `${prefix}-${nums[i]}`;
+    });
+  }
+
+  // Apply per player: reset codes to their existing structured ones + the new
+  // codes; move every previous (non-structured) code — and the id — into
+  // legacyCodes so nothing already printed stops scanning.
+  const touched = new Set();
+  plan.jobs.forEach(j => {
+    if (!j.code) return;
+    const t = j.t;
+    if (!touched.has(t)) {
+      const structured = (t.codes || []).filter(isStructuredCode);
+      const legacy = (t.codes || []).filter(c => !isStructuredCode(c));
+      t.legacyCodes = Array.from(new Set([...(t.legacyCodes || []), ...legacy, t.id].filter(Boolean)));
+      t.codes = structured.slice();
+      touched.add(t);
+    }
+    t.codes.push(j.code);
+  });
+
+  const assigned = plan.jobs.filter(j => j.code).length;
+  touched.forEach(t => dbSetDoc(traineesCol, t.id, t));
+  _codeMigrationPlan = null;
+
+  closeModal();
+  updateTraineesTable();
+  showNotification(`تم توحيد أكواد ${touched.size} لاعب (${assigned} كود). يمكنك الطباعة الآن.`);
 }
 
 // Normalize any stored date (Arabic or ISO) to a "YYYY-MM-DD" key, so a
@@ -5592,6 +5980,46 @@ function renderBranchTargets() {
   }).join('');
 }
 
+// ---- Unified totals: the KPI cards render instantly from the loaded window,
+// then are REFINED with exact figures from the fd_totals() SQL aggregate (which
+// sees every record regardless of what's loaded in memory). Falls back
+// silently to the in-memory figures when offline or the RPC isn't installed. ----
+let fdTotalsGen = 0;
+async function refineFdTotalsFromServer(branch, dateFrom, dateTo) {
+  if (!navigator.onLine) return;
+  const gen = ++fdTotalsGen;
+  const p_from = dateFrom ? new Date(dateFrom).setHours(0, 0, 0, 0) : null;
+  const p_to = dateTo ? new Date(dateTo).setHours(23, 59, 59, 999) : null;
+  try {
+    const { data: rows, error } = await sb.rpc('fd_totals', { p_from, p_to });
+    if (error) throw error;
+    if (gen !== fdTotalsGen) return; // filters changed meanwhile — stale
+    let rev = 0,
+      exp = 0;
+    (rows || []).forEach(r => {
+      const b = normalizeBranch(r.branch || 'غير محدد');
+      if (branch !== 'الكل' && b !== branch) return;
+      rev += num(r.revenue);
+      exp += num(r.expenses);
+    });
+    const net = rev - exp;
+    const set = (id, v) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = v;
+    };
+    set('fd-total-income', `${rev.toLocaleString()} ج.م`);
+    set('fd-total-expenses', `${exp.toLocaleString()} ج.م`);
+    set('fd-net-profit', `${net.toLocaleString()} ج.م`);
+    set('fd-profit-margin', `هامش الربح: ${rev > 0 ? Math.round((net / rev) * 100) : 0}%`);
+    set('fd-income-badge', `${rev.toLocaleString()} ج.م`);
+    set('fd-expense-badge', `${exp.toLocaleString()} ج.م`);
+    const profitEl = document.getElementById('fd-net-profit');
+    if (profitEl) profitEl.style.color = net >= 0 ? 'var(--success)' : 'var(--danger)';
+  } catch (e) {
+    /* RPC missing or unreachable — the in-memory KPIs already rendered */
+  }
+}
+
 function renderFinancialDashboard() {
   const branch = document.getElementById('fd-branch-filter').value;
   const dateFrom = document.getElementById('fd-date-from').value;
@@ -5646,6 +6074,11 @@ function renderFinancialDashboard() {
   document.getElementById('fd-income-badge').textContent = `${totalIncome.toLocaleString()} ج.م`;
   document.getElementById('fd-expense-badge').textContent = `${totalExpenses.toLocaleString()} ج.م`;
   document.getElementById('fd-salary-badge').textContent = `${totalSalaries.toLocaleString()} ج.م`;
+
+  // Refine the KPI figures with the exact server-side aggregate (async).
+  refineFdTotalsFromServer(branch, dateFrom, dateTo);
+  // Last-6-months revenue trend (countable revenue only).
+  renderMonthlyTrend(branch);
 
   // === Monthly targets per branch (forecast) ===
   renderBranchTargets();
@@ -5841,6 +6274,9 @@ function renderFinancialDashboard() {
 
 // Quick period buttons: fill the from/to date inputs with the month's bounds
 // (so the user SEES the range being applied), load that window, then render.
+// Guarded like the main dashboard: only the latest selection renders, so a slow
+// older load can't overwrite newer figures (the toggle-to-refresh problem).
+let fdSelectionGen = 0;
 function fdSetPeriod(period) {
   markPeriodButtons('fd', period);
   const bounds = periodBounds(period);
@@ -5851,13 +6287,17 @@ function fdSetPeriod(period) {
   if (bounds) {
     document.getElementById('fd-date-from').value = iso(bounds.from);
     document.getElementById('fd-date-to').value = iso(bounds.to);
-    loadHistoryRange(bounds.from, bounds.to).then(renderFinancialDashboard);
   } else {
     document.getElementById('fd-date-from').value = '';
     document.getElementById('fd-date-to').value = '';
-    if (!historyFullyLoaded) loadAllHistory().then(renderFinancialDashboard);
-    else renderFinancialDashboard();
   }
+  const token = ++fdSelectionGen;
+  const render = () => {
+    if (token === fdSelectionGen) renderFinancialDashboard();
+  };
+  if (historyFullyLoaded) render();
+  else if (bounds) loadHistoryRange(bounds.from, bounds.to).then(render);
+  else loadAllHistory().then(render);
 }
 
 // Editing a date by hand means a custom range — drop the period highlight.
@@ -6568,21 +7008,76 @@ function printDailyReport() {
   reportDoc(`تقرير يومي - ${dateVal}`, body);
 }
 
+// Exports the players list as a real Excel-openable file (.xls): an HTML
+// table with UTF-8 BOM + RTL direction — opens formatted in Excel, unlike the
+// old raw CSV where Arabic columns often broke.
 function exportData() {
-  const csv = data.trainees
-    .map(t => `${t.id},${t.name},${t.phone},${t.type},${t.plan},${t.status},${t.registrationDate}`)
-    .join('\n');
-
-  const header = 'الكود,الاسم,الهاتف,النوع,الخطة,الحالة,التاريخ\n';
-  const blob = new Blob(['\uFEFF' + header + csv], { type: 'text/csv;charset=utf-8;' });
+  const headers = [
+    'الكود',
+    'الاسم',
+    'الهاتف',
+    'النوع',
+    'الفرع',
+    'الرياضة',
+    'المدرب',
+    'الحالة',
+    'تاريخ الانتهاء',
+    'المدفوع',
+    'تاريخ التسجيل',
+  ];
+  const rows = data.trainees.map(t =>
+    [
+      t.id,
+      t.name,
+      t.phone,
+      t.type === 'subscription' ? 'اشتراك' : 'تجريبي',
+      t.branch || 'غير محدد',
+      sportLabel(t),
+      t.trainer || 'غير محدد',
+      t.status,
+      t.expiryDate || '-',
+      num(t.amount),
+      t.registrationDate,
+    ]
+      .map(v => `<td>${esc(v == null ? '' : v)}</td>`)
+      .join(''),
+  );
+  const table = `
+ <html dir="rtl"><head><meta charset="UTF-8"></head><body>
+ <table border="1" style="direction:rtl;">
+ <thead><tr style="background:#1B2433;color:#fff;font-weight:bold;">${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+ <tbody>${rows.map(r => `<tr>${r}</tr>`).join('')}</tbody>
+ </table></body></html>`;
+  const blob = new Blob(['﻿' + table], { type: 'application/vnd.ms-excel;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'trainees.csv';
+  a.download = `trainees-${todayISO()}.xls`;
   a.click();
+  URL.revokeObjectURL(url);
+  showNotification(`تم تصدير ${rows.length} لاعباً إلى ملف Excel`);
 }
 
 // ==================== BACKUP & RESTORE ====================
+// Weekly AUTOMATIC backup: on an admin device, once every 7 days, load the
+// FULL history (the in-memory copy is only a recent window) then download a
+// complete backup file — so there's always a recent copy even if nobody
+// remembers to press the manual button.
+const AUTO_BACKUP_DAYS = 7;
+async function maybeAutoBackup() {
+  if (currentRole !== 'admin' || !navigator.onLine) return;
+  const last = parseInt(localStorage.getItem('last-auto-backup') || '0', 10);
+  if (Date.now() - last < AUTO_BACKUP_DAYS * 86400000) return;
+  try {
+    showNotification('جارٍ إنشاء النسخة الاحتياطية الأسبوعية التلقائية...', 'warning');
+    await loadAllHistory(); // the backup must contain ALL records, not a window
+    backupAllData();
+    localStorage.setItem('last-auto-backup', String(Date.now()));
+  } catch (e) {
+    console.error('Auto-backup failed:', e);
+  }
+}
+
 // Full-system backup: download EVERY collection as one JSON file, so the
 // whole database can be rebuilt later if the server/database is ever lost.
 function backupAllData() {
@@ -6781,8 +7276,10 @@ function roleForEmail(email) {
   return ADMIN_EMAILS.includes((email || '').toLowerCase()) ? 'admin' : 'employee';
 }
 
-// Shows/hides sidebar items based on role. NOTE: this is a UI gate, not
-// hard security — real enforcement would need Supabase row-level security.
+// Shows/hides sidebar items based on role. NOTE: this is a UI convenience gate
+// only — the real, unbypassable enforcement lives in Supabase Row-Level
+// Security (see enable-rls-security.sql): no DB access without a login, and
+// editing/deleting payments & expenses is limited to admin accounts there.
 function applyRolePermissions(role) {
   const navItems = document.querySelectorAll('.nav-item');
   if (role === 'admin') {
@@ -6963,6 +7460,10 @@ async function startApp(user) {
 
   applyRolePermissions(currentRole);
   initCollapsibleCards();
+
+  // Weekly automatic backup (admin devices) — delayed so it never slows the
+  // first paint; loads the full history before downloading the file.
+  setTimeout(maybeAutoBackup, 8000);
 }
 
 // ==================== COLLAPSIBLE CARDS & TABLE FILTERS ====================

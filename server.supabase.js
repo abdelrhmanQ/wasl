@@ -473,6 +473,20 @@ function enqueueOp(op) {
   saveOutbox();
 }
 
+// Refunds one session to a session-based subscriber whose offline check-in was
+// later rejected as a cross-device duplicate. Without this, the session spent
+// optimistically at check-in time would be lost even though the visit never
+// counted. Re-activates the player if the refund lifts them off zero.
+function restoreConsumedSession(traineeId) {
+  const t = (data.trainees || []).find(x => x.id === traineeId);
+  if (!t || t.subType !== 'sessions') return;
+  t.sessionsRemaining = num(t.sessionsRemaining) + 1;
+  if (t.status === 'منتهي' && t.sessionsRemaining > 0) t.status = 'نشط';
+  dbSetDoc(traineesCol, t.id, t);
+  if (typeof updateTraineesTable === 'function') updateTraineesTable();
+  if (typeof updateDashboard === 'function') updateDashboard();
+}
+
 // Sends ONE queued op to Supabase. Throws on failure (caller decides retry).
 async function sendOp(op) {
   if (op.kind === 'upsert') {
@@ -483,7 +497,13 @@ async function sendOp(op) {
     if (op.table === attendanceCol) row.trainee_id = op.obj.id || null;
     const { error } = await sb.from(op.table).insert(row);
     // Unique-index rejection = another device already recorded it — drop ours.
-    if (error && error.code === '23505') return;
+    if (error && error.code === '23505') {
+      // This queued check-in was a cross-device duplicate. If we optimistically
+      // spent a session for it offline, refund that session — the check-in
+      // never actually counted.
+      if (op.table === attendanceCol && op.obj.sessionConsumed) restoreConsumedSession(op.obj.id);
+      return;
+    }
     if (error) throw error;
   } else if (op.kind === 'delete') {
     const { error } = await sb.from(op.table).delete().eq('id', String(op.rowId));
