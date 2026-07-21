@@ -844,6 +844,28 @@ async function dbSaveCounter() {
   }
 }
 
+// Accurate per-player attendance summary straight from the DB — NOT limited to
+// the loaded time window — so the scan card shows the real last visit even for
+// players absent longer than the cached window, plus a recent visit count.
+// Every attendance row carries trainee_id (set on insert), so we match on it.
+// Throws when offline; the caller falls back to the local (windowed) data.
+async function dbAttendanceSummary(traineeId, days = 30) {
+  const id = String(traineeId);
+  const cutoff = Date.now() - days * 86400000;
+  const [lastRes, countRes] = await Promise.all([
+    sb.from(attendanceCol).select('ts,data').eq('trainee_id', id).order('ts', { ascending: false }).limit(1),
+    sb.from(attendanceCol).select('*', { count: 'exact', head: true }).eq('trainee_id', id).gte('ts', cutoff),
+  ]);
+  if (lastRes.error) throw lastRes.error;
+  if (countRes.error) throw countRes.error;
+  const row = (lastRes.data && lastRes.data[0]) || null;
+  return {
+    lastTs: row ? Number(row.ts) || 0 : 0,
+    lastDate: row && row.data ? row.data.date || '' : '',
+    count: countRes.count || 0,
+  };
+}
+
 // Checks the WHOLE table (not this device's branch-filtered copy) for an id.
 // Used when generating a new player id: another branch's player is invisible
 // locally, so only the DB can say the id is really free.

@@ -2062,16 +2062,22 @@ async function recordAttendance() {
 
   const info = subInfo(trainee);
 
+  // Accurate attendance summary (last visit + recent count) read straight from
+  // the DB, so it's correct even for players absent longer than the loaded
+  // window. Measured BEFORE today's record is added, so it reflects the PREVIOUS
+  // visit. Falls back to the local windowed data when offline.
+  const summary = await attendanceSummary(trainee);
+
   // Frozen subscription -> paused, entry not allowed.
   if (trainee.frozen) {
-    renderAttendanceCard(trainee, info, { state: 'frozen' });
+    renderAttendanceCard(trainee, info, { state: 'frozen', summary });
     document.getElementById('attendance-code').value = '';
     return;
   }
 
   // Expired subscription -> entry forbidden, nothing is recorded.
   if (trainee.type === 'subscription' && info.expired) {
-    renderAttendanceCard(trainee, info, { state: 'blocked' });
+    renderAttendanceCard(trainee, info, { state: 'blocked', summary });
     document.getElementById('attendance-code').value = '';
     return;
   }
@@ -2083,14 +2089,14 @@ async function recordAttendance() {
     a => a.id === code && a.date === today && (a.sport || '') === attendedSport,
   );
   if (alreadyCheckedIn) {
-    renderAttendanceCard(trainee, info, { state: 'already', sport: attendedSport });
+    renderAttendanceCard(trainee, info, { state: 'already', sport: attendedSport, summary });
     document.getElementById('attendance-code').value = '';
     return;
   }
 
-  // Detect a comeback after a long absence (measured BEFORE adding today's record).
-  const absBefore = lastAttendanceInfo(trainee);
-  const returnedAfter = !absBefore.neverAttended && absBefore.days >= ABSENCE_ALERT_DAYS ? absBefore.days : 0;
+  // Detect a comeback after a long absence (from the accurate last visit above).
+  const returnedAfter =
+    !summary.lastSeen.neverAttended && summary.lastSeen.days >= ABSENCE_ALERT_DAYS ? summary.lastSeen.days : 0;
 
   const now = new Date();
   const time = now.toLocaleTimeString('ar-EG');
@@ -2111,7 +2117,7 @@ async function recordAttendance() {
   if (res && res.duplicate) {
     // Another device already recorded this player today — undo the local copy.
     data.attendance.splice(data.attendance.indexOf(attendanceEntry), 1);
-    renderAttendanceCard(trainee, info, { state: 'already', sport: attendedSport });
+    renderAttendanceCard(trainee, info, { state: 'already', sport: attendedSport, summary });
     document.getElementById('attendance-code').value = '';
     updateAttendanceLog();
     return;
@@ -2126,7 +2132,14 @@ async function recordAttendance() {
   }
 
   const after = subInfo(trainee);
-  renderAttendanceCard(trainee, after, { state: 'recorded', time, returnedAfter, sport: attendedSport });
+  renderAttendanceCard(trainee, after, {
+    state: 'recorded',
+    time,
+    returnedAfter,
+    sport: attendedSport,
+    // Include today's just-recorded visit in the "recent" count shown.
+    summary: { ...summary, count: summary.count + 1 },
+  });
 
   document.getElementById('attendance-code').value = '';
   updateAttendanceLog();
@@ -2135,12 +2148,62 @@ async function recordAttendance() {
   showNotification(`تم تسجيل حضور ${trainee.name}${attendedSport ? ' - ' + attendedSport : ''}`);
 }
 
-// Builds a small info row for the attendance result card.
-function attRow(label, value) {
+// Builds a small info row for the attendance result card. `valueColor` (an
+// internal CSS value, never user input) tints the value — used to flag dues.
+function attRow(label, value, valueColor) {
+  const color = valueColor ? `color:${valueColor};` : '';
   return `<div style="background:rgba(48,56,65,0.04);border-radius:8px;padding:8px 10px;text-align:right;">
  <div style="font-size:11px;color:rgba(48,56,65,0.5);">${esc(label)}</div>
- <div style="font-weight:700;font-size:14px;">${esc(value)}</div>
+ <div style="font-weight:700;font-size:14px;${color}">${esc(value)}</div>
  </div>`;
+}
+
+// Human phrasing for "when did this player last attend", shown on the scan
+// card. `ls` is a lastAttendanceInfo()-shaped result ({days, lastDate,
+// neverAttended}); the caller measures it BEFORE today's visit is recorded.
+function lastSeenLabel(ls) {
+  if (!ls || ls.neverAttended) return 'أول حضور';
+  if (ls.days <= 0) return 'اليوم';
+  if (ls.days === 1) return 'أمس';
+  return `${ls.lastDate} · منذ ${ls.days} يوم`;
+}
+
+// How many times this player attended in the last `days` days, counted from the
+// local (windowed) data — the offline fallback for the DB-backed count.
+function localRecentCount(t, days) {
+  const cutoff = Date.now() - days * 86400000;
+  return data.attendance.filter(a => a.id === t.id && parseDate(a.date) >= cutoff).length;
+}
+
+// Normalized attendance summary for the scan card: the last visit (as a
+// lastAttendanceInfo-shaped object) and a recent visit count. Prefers an
+// accurate DB read (any date range); falls back to the local windowed data
+// when offline or on error, so a scan never fails just because the summary
+// couldn't be fetched.
+async function attendanceSummary(t) {
+  const RECENT_DAYS = 30;
+  try {
+    if (!navigator.onLine) throw new Error('offline');
+    const s = await dbAttendanceSummary(t.id, RECENT_DAYS);
+    let lastSeen;
+    if (!s.lastTs) {
+      lastSeen = { days: null, lastDate: '', neverAttended: true };
+    } else {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const last = new Date(s.lastTs);
+      last.setHours(0, 0, 0, 0);
+      const days = Math.floor((today.getTime() - last.getTime()) / 86400000);
+      lastSeen = {
+        days,
+        lastDate: s.lastDate || new Date(s.lastTs).toLocaleDateString('ar-EG'),
+        neverAttended: false,
+      };
+    }
+    return { lastSeen, count: s.count };
+  } catch (e) {
+    return { lastSeen: lastAttendanceInfo(t), count: localRecentCount(t, RECENT_DAYS) };
+  }
 }
 
 // Renders the full attendance result: trainee details + a status alert.
@@ -2159,6 +2222,11 @@ function renderAttendanceCard(t, info, opts) {
     'attendance-result ' + (opts.state === 'blocked' || opts.state === 'frozen' ? 'error' : 'success');
 
   const typeLabel = info.kind === 'sessions' ? 'بالحصص' : info.kind === 'days' ? 'بالأيام' : '—';
+  // Attendance summary (last visit + recent count). Provided by the caller
+  // (accurate DB read, measured before today's visit); fall back to local data.
+  const summary = opts.summary || { lastSeen: lastAttendanceInfo(t), count: localRecentCount(t, 30) };
+  // Outstanding dues = full price minus what's been paid (subscriptions only).
+  const outstanding = t.type === 'subscription' ? Math.max(0, num(t.subTotal) - num(t.subPaid)) : 0;
   const details = `
  <div style="font-size:20px;font-weight:800;margin-bottom:4px;">${esc(t.name)}</div>
  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
@@ -2168,8 +2236,13 @@ function renderAttendanceCard(t, info, opts) {
  ${attRow('الفرع', t.branch || 'غير محدد')}
  ${attRow('نوع الاشتراك', typeLabel)}
  ${attRow('المتبقي', info.remLabel || '—')}
+ ${attRow('آخر حضور', lastSeenLabel(summary.lastSeen))}
+ ${attRow('الحضور (آخر ٣٠ يوم)', `${num(summary.count)} مرة`)}
+ ${t.type === 'subscription' ? attRow('المستحقات', outstanding > 0 ? `${outstanding.toLocaleString()} ج.م` : 'مسدّد بالكامل', outstanding > 0 ? 'var(--danger)' : 'var(--success)') : ''}
+ ${attRow('تاريخ التسجيل', t.registrationDate || '-')}
  ${info.kind === 'days' ? attRow('تاريخ الانتهاء', t.expiryDate || '-') : ''}
- </div>`;
+ </div>
+ ${t.notes ? `<div style="margin-top:8px;background:rgba(48,56,65,0.04);border-radius:8px;padding:8px 10px;text-align:right;"><div style="font-size:11px;color:rgba(48,56,65,0.5);">📝 ملاحظات</div><div style="font-weight:600;font-size:13px;">${esc(t.notes)}</div></div>` : ''}`;
 
   let alert = '';
   if (opts.state === 'frozen') {
@@ -2188,6 +2261,12 @@ function renderAttendanceCard(t, info, opts) {
       alert += `<div class="att-alert att-alert-warning">⚠️ تم استهلاك آخر حصة في الاشتراك. برجاء التجديد قبل الحضور القادم.</div>`;
     else if (info.near)
       alert += `<div class="att-alert att-alert-warning">⚠️ الاشتراك قارب على الانتهاء (${esc(info.remLabel)}). برجاء تجديد الاشتراك.</div>`;
+  }
+
+  // Flag outstanding dues at the door — only after a successful/duplicate scan
+  // (on frozen/blocked the renewal warning already dominates the card).
+  if (outstanding > 0 && (opts.state === 'recorded' || opts.state === 'already')) {
+    alert += `<div class="att-alert att-alert-warning">💰 عليه مستحقات متبقية: ${outstanding.toLocaleString()} ج.م — برجاء التحصيل.</div>`;
   }
 
   // Offer a one-click renewal whenever the subscription is expired or close.
@@ -7015,21 +7094,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Single source of truth for "is the user logged in?". Fires on load,
   // after login, after logout, and on token refresh.
+  //
+  // Supabase re-fires this on TOKEN_REFRESHED / USER_UPDATED (roughly hourly,
+  // and when the tab regains focus) with the SAME session. Guard so the full
+  // startup (which reloads all data, flashes the loading overlay and resets
+  // the open forms' date fields) runs once per sign-in — only re-running when
+  // the account actually changes.
+  let startedForEmail = null;
   auth.onAuthStateChanged(user => {
-    if (user) {
-      startApp(user);
+    // Effective account: the verified session user, or (offline, if this
+    // device signed in before) the last account — writes then queue in the
+    // outbox and upload when the connection returns.
+    const effective = user || offlineLastUser();
+    if (!effective) {
+      startedForEmail = null;
+      showLoginScreen();
       return;
     }
-    // No verified session. If we're OFFLINE and this device signed in
-    // before, open read/write with the last account (writes queue in the
-    // outbox and upload when the connection returns).
-    const last = offlineLastUser();
-    if (last) {
-      showNotification('وضع أوفلاين — تم الدخول بآخر حساب مسجّل على هذا الجهاز', 'warning');
-      startApp(last);
-    } else {
-      showLoginScreen();
-    }
+    if (startedForEmail === effective.email) return; // duplicate / token refresh
+    startedForEmail = effective.email;
+    if (!user) showNotification('وضع أوفلاين — تم الدخول بآخر حساب مسجّل على هذا الجهاز', 'warning');
+    startApp(effective);
   });
 
   // Service worker: caches the app files so it opens with no internet.

@@ -1,504 +1,598 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ar" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" type="image/x-icon" href="src/logo-after.ico">
-<title>EL Wasl Academy | الرياضات</title>
-<style>
-  * {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-  }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/x-icon" href="src/logo-after.ico" />
+    <title>EL Wasl Academy | الرياضات</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family:
+          'Segoe UI',
+          'Inter',
+          system-ui,
+          -apple-system,
+          'Helvetica Neue',
+          Arial,
+          sans-serif;
+      }
 
-  :root {
-    --primary: #F3F5F8;
-    --secondary: #E8EBF1;
-    --accent: #1B2433;
-    --gold: #B8901F;
-    --gold-light: #D4AF37;
-    --text: #1B2433;
-    --card-bg: #FFFFFF;
-    --success: #3F8F6F;
-    --radius: 14px;
-    --shadow-sm: 0 1px 2px rgba(27,36,51,0.05), 0 2px 6px rgba(27,36,51,0.05);
-    --shadow-md: 0 6px 22px rgba(27,36,51,0.09);
-  }
+      :root {
+        --primary: #f3f5f8;
+        --secondary: #e8ebf1;
+        --accent: #1b2433;
+        --gold: #b8901f;
+        --gold-light: #d4af37;
+        --text: #1b2433;
+        --card-bg: #ffffff;
+        --success: #3f8f6f;
+        --radius: 14px;
+        --shadow-sm: 0 1px 2px rgba(27, 36, 51, 0.05), 0 2px 6px rgba(27, 36, 51, 0.05);
+        --shadow-md: 0 6px 22px rgba(27, 36, 51, 0.09);
+      }
 
-  body {
-    background:
-      radial-gradient(1100px 520px at 100% -8%, rgba(184,144,31,0.07), transparent 58%),
-      linear-gradient(180deg, var(--primary) 0%, #E9EDF3 100%);
-    background-attachment: fixed;
-    color: var(--text);
-    min-height: 100vh;
-    -webkit-font-smoothing: antialiased;
-    letter-spacing: 0.15px;
-  }
+      body {
+        background:
+          radial-gradient(1100px 520px at 100% -8%, rgba(184, 144, 31, 0.07), transparent 58%),
+          linear-gradient(180deg, var(--primary) 0%, #e9edf3 100%);
+        background-attachment: fixed;
+        color: var(--text);
+        min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
+        letter-spacing: 0.15px;
+      }
 
-  /* ===== HEADER ===== */
-  header {
-    background: linear-gradient(120deg, #1B2433 0%, #243049 100%);
-    border-bottom: 2px solid var(--gold);
-    padding: 16px 32px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    box-shadow: 0 4px 22px rgba(15,22,32,0.28);
-    position: sticky;
-    top: 0;
-    z-index: 1000;
-  }
+      /* ===== HEADER ===== */
+      header {
+        background: linear-gradient(120deg, #1b2433 0%, #243049 100%);
+        border-bottom: 2px solid var(--gold);
+        padding: 16px 32px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 4px 22px rgba(15, 22, 32, 0.28);
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+      }
 
-  .logo {
-    display: inline-flex;
-    align-items: center;
-    gap: 12px;
-    font-size: 24px;
-    font-weight: 900;
-    letter-spacing: 2px;
-    color: #ffffff;
-    text-shadow: 0 2px 14px rgba(0,0,0,0.35);
-  }
-  .logo-img { height: 54px; width: auto; display: block; }
-  .logo .brand span { color: var(--gold-light); }
+      .logo {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 24px;
+        font-weight: 900;
+        letter-spacing: 2px;
+        color: #ffffff;
+        text-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
+      }
+      .logo-img {
+        height: 54px;
+        width: auto;
+        display: block;
+      }
+      .logo .brand span {
+        color: var(--gold-light);
+      }
 
-  /* ===== PAGE CONTENT ===== */
-  .content { padding: 34px 32px 60px; max-width: 1280px; margin: 0 auto; }
+      /* ===== PAGE CONTENT ===== */
+      .content {
+        padding: 34px 32px 60px;
+        max-width: 1280px;
+        margin: 0 auto;
+      }
 
-  .page-title { margin-bottom: 25px; }
-  .page-title h2 {
-    font-size: 26px;
-    font-weight: 800;
-    color: var(--accent);
-    position: relative;
-    display: inline-block;
-    padding-bottom: 10px;
-  }
-  .page-title h2::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    right: 0;
-    width: 52px;
-    height: 3px;
-    background: linear-gradient(90deg, var(--gold), var(--gold-light));
-    border-radius: 2px;
-  }
-  .page-title p { color: rgba(48,56,65,0.5); font-size: 14px; margin-top: 6px; }
+      .page-title {
+        margin-bottom: 25px;
+      }
+      .page-title h2 {
+        font-size: 26px;
+        font-weight: 800;
+        color: var(--accent);
+        position: relative;
+        display: inline-block;
+        padding-bottom: 10px;
+      }
+      .page-title h2::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 52px;
+        height: 3px;
+        background: linear-gradient(90deg, var(--gold), var(--gold-light));
+        border-radius: 2px;
+      }
+      .page-title p {
+        color: rgba(48, 56, 65, 0.5);
+        font-size: 14px;
+        margin-top: 6px;
+      }
 
-  /* ===== TOOLBAR ===== */
-  .toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
-    margin-bottom: 28px;
-  }
-  .search-box {
-    flex: 1;
-    min-width: 220px;
-    background: #ffffff;
-    border: 1px solid rgba(27,36,51,0.14);
-    border-radius: 10px;
-    padding: 12px 15px;
-    color: var(--text);
-    font-size: 14px;
-  }
-  .search-box::placeholder { color: rgba(27,36,51,0.35); }
-  .search-box:focus {
-    outline: none;
-    border-color: var(--gold);
-    box-shadow: 0 0 0 3px rgba(184,144,31,0.16);
-  }
-  .filter-pills { display: flex; flex-wrap: wrap; gap: 8px; }
-  .pill {
-    padding: 9px 18px;
-    border-radius: 20px;
-    border: 1px solid rgba(27,36,51,0.16);
-    background: #ffffff;
-    color: var(--accent);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .pill:hover { border-color: var(--gold); }
-  .pill.active {
-    background: linear-gradient(135deg, #C99C24 0%, #A87E16 100%);
-    color: #fff;
-    border-color: transparent;
-  }
+      /* ===== TOOLBAR ===== */
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 28px;
+      }
+      .search-box {
+        flex: 1;
+        min-width: 220px;
+        background: #ffffff;
+        border: 1px solid rgba(27, 36, 51, 0.14);
+        border-radius: 10px;
+        padding: 12px 15px;
+        color: var(--text);
+        font-size: 14px;
+      }
+      .search-box::placeholder {
+        color: rgba(27, 36, 51, 0.35);
+      }
+      .search-box:focus {
+        outline: none;
+        border-color: var(--gold);
+        box-shadow: 0 0 0 3px rgba(184, 144, 31, 0.16);
+      }
+      .filter-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .pill {
+        padding: 9px 18px;
+        border-radius: 20px;
+        border: 1px solid rgba(27, 36, 51, 0.16);
+        background: #ffffff;
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .pill:hover {
+        border-color: var(--gold);
+      }
+      .pill.active {
+        background: linear-gradient(135deg, #c99c24 0%, #a87e16 100%);
+        color: #fff;
+        border-color: transparent;
+      }
 
-  /* ===== SPORTS GRID ===== */
-  .sports-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 22px;
-    align-items: start;
-  }
+      /* ===== SPORTS GRID ===== */
+      .sports-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 22px;
+        align-items: start;
+      }
 
-  .sport-card {
-    background: var(--card-bg);
-    border-radius: var(--radius);
-    border: 1px solid rgba(27,36,51,0.06);
-    box-shadow: var(--shadow-sm);
-    overflow: hidden;
-    cursor: pointer;
-  }
-  .sport-card:hover { box-shadow: var(--shadow-md); }
+      .sport-card {
+        background: var(--card-bg);
+        border-radius: var(--radius);
+        border: 1px solid rgba(27, 36, 51, 0.06);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+        cursor: pointer;
+      }
+      .sport-card:hover {
+        box-shadow: var(--shadow-md);
+      }
 
-  .sport-head {
-    background: linear-gradient(120deg, #1B2433 0%, #243049 100%);
-    border-bottom: 2px solid var(--gold);
-    padding: 22px 24px 18px;
-    position: relative;
-    color: #fff;
-  }
-  .sport-emoji { font-size: 38px; line-height: 1; display: block; margin-bottom: 10px; }
-  .sport-name { font-size: 19px; font-weight: 800; letter-spacing: 0.3px; }
-  .sport-cat { font-size: 12px; color: var(--gold-light); font-weight: 600; margin-top: 4px; }
+      .sport-head {
+        background: linear-gradient(120deg, #1b2433 0%, #243049 100%);
+        border-bottom: 2px solid var(--gold);
+        padding: 22px 24px 18px;
+        position: relative;
+        color: #fff;
+      }
+      .sport-emoji {
+        font-size: 38px;
+        line-height: 1;
+        display: block;
+        margin-bottom: 10px;
+      }
+      .sport-name {
+        font-size: 19px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+      }
+      .sport-cat {
+        font-size: 12px;
+        color: var(--gold-light);
+        font-weight: 600;
+        margin-top: 4px;
+      }
 
-  .price-tag {
-    position: absolute;
-    top: 18px;
-    left: 18px;
-    background: linear-gradient(135deg, #D4AF37 0%, #B8901F 100%);
-    color: #1B2433;
-    font-weight: 800;
-    font-size: 14px;
-    padding: 6px 14px;
-    border-radius: 20px;
-    white-space: nowrap;
-  }
-  .price-tag small { font-weight: 600; font-size: 10px; }
+      .price-tag {
+        position: absolute;
+        top: 18px;
+        left: 18px;
+        background: linear-gradient(135deg, #d4af37 0%, #b8901f 100%);
+        color: #1b2433;
+        font-weight: 800;
+        font-size: 14px;
+        padding: 6px 14px;
+        border-radius: 20px;
+        white-space: nowrap;
+      }
+      .price-tag small {
+        font-weight: 600;
+        font-size: 10px;
+      }
 
-  .sport-body { padding: 18px 24px; }
-  .sport-desc { font-size: 14px; line-height: 1.75; color: rgba(27,36,51,0.7); }
+      .sport-body {
+        padding: 18px 24px;
+      }
+      .sport-desc {
+        font-size: 14px;
+        line-height: 1.75;
+        color: rgba(27, 36, 51, 0.7);
+      }
 
-  .meta-badge {
-    display: inline-block;
-    margin-top: 14px;
-    padding: 5px 12px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
-    background: rgba(184,144,31,0.12);
-    color: var(--gold);
-  }
+      .meta-badge {
+        display: inline-block;
+        margin-top: 14px;
+        padding: 5px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        background: rgba(184, 144, 31, 0.12);
+        color: var(--gold);
+      }
 
-  /* ===== سهم الفتح ===== */
-  .expand-hint {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 11px;
-    font-size: 12.5px;
-    font-weight: 700;
-    color: var(--gold);
-    border-top: 1px solid rgba(27,36,51,0.08);
-    user-select: none;
-  }
-  .expand-hint .chev {
-    display: inline-block;
-    transition: transform 0.35s ease;
-    font-size: 13px;
-  }
-  .sport-card.open .expand-hint .chev { transform: rotate(180deg); }
+      /* ===== سهم الفتح ===== */
+      .expand-hint {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 11px;
+        font-size: 12.5px;
+        font-weight: 700;
+        color: var(--gold);
+        border-top: 1px solid rgba(27, 36, 51, 0.08);
+        user-select: none;
+      }
+      .expand-hint .chev {
+        display: inline-block;
+        transition: transform 0.35s ease;
+        font-size: 13px;
+      }
+      .sport-card.open .expand-hint .chev {
+        transform: rotate(180deg);
+      }
 
-  /* ===== الشروط (أكورديون) — الأنيميشن الوحيد في الصفحة ===== */
-  .conditions-wrap {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.45s cubic-bezier(0.4, 0, 0.2, 1);
-    background: rgba(27,36,51,0.03);
-  }
-  .sport-card.open .conditions-wrap { max-height: 420px; }
+      /* ===== الشروط (أكورديون) — الأنيميشن الوحيد في الصفحة ===== */
+      .conditions-wrap {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+        background: rgba(27, 36, 51, 0.03);
+      }
+      .sport-card.open .conditions-wrap {
+        max-height: 420px;
+      }
 
-  .conditions-inner { padding: 16px 24px 22px; }
-  .conditions-title {
-    font-size: 13.5px;
-    font-weight: 700;
-    color: var(--accent);
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid rgba(27,36,51,0.08);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .conditions-title::before { content: '📋'; font-size: 15px; }
+      .conditions-inner {
+        padding: 16px 24px 22px;
+      }
+      .conditions-title {
+        font-size: 13.5px;
+        font-weight: 700;
+        color: var(--accent);
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid rgba(27, 36, 51, 0.08);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .conditions-title::before {
+        content: '📋';
+        font-size: 15px;
+      }
 
-  .conditions { list-style: none; display: flex; flex-direction: column; gap: 9px; }
-  .conditions li {
-    font-size: 13px;
-    color: rgba(27,36,51,0.78);
-    line-height: 1.6;
-    padding-right: 24px;
-    position: relative;
-    opacity: 0;
-    transform: translateY(6px);
-    transition: opacity 0.3s ease, transform 0.3s ease;
-  }
-  .sport-card.open .conditions li { opacity: 1; transform: translateY(0); }
-  .sport-card.open .conditions li:nth-child(1) { transition-delay: 0.10s; }
-  .sport-card.open .conditions li:nth-child(2) { transition-delay: 0.18s; }
-  .sport-card.open .conditions li:nth-child(3) { transition-delay: 0.26s; }
-  .sport-card.open .conditions li:nth-child(4) { transition-delay: 0.34s; }
-  .sport-card.open .conditions li:nth-child(5) { transition-delay: 0.42s; }
-  .conditions li::before {
-    content: '✔';
-    position: absolute;
-    right: 0;
-    top: 1px;
-    color: var(--success);
-    font-weight: 700;
-    font-size: 13px;
-  }
+      .conditions {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+      }
+      .conditions li {
+        font-size: 13px;
+        color: rgba(27, 36, 51, 0.78);
+        line-height: 1.6;
+        padding-right: 24px;
+        position: relative;
+        opacity: 0;
+        transform: translateY(6px);
+        transition:
+          opacity 0.3s ease,
+          transform 0.3s ease;
+      }
+      .sport-card.open .conditions li {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .sport-card.open .conditions li:nth-child(1) {
+        transition-delay: 0.1s;
+      }
+      .sport-card.open .conditions li:nth-child(2) {
+        transition-delay: 0.18s;
+      }
+      .sport-card.open .conditions li:nth-child(3) {
+        transition-delay: 0.26s;
+      }
+      .sport-card.open .conditions li:nth-child(4) {
+        transition-delay: 0.34s;
+      }
+      .sport-card.open .conditions li:nth-child(5) {
+        transition-delay: 0.42s;
+      }
+      .conditions li::before {
+        content: '✔';
+        position: absolute;
+        right: 0;
+        top: 1px;
+        color: var(--success);
+        font-weight: 700;
+        font-size: 13px;
+      }
 
-  .no-results {
-    grid-column: 1 / -1;
-    text-align: center;
-    padding: 60px 20px;
-    color: rgba(27,36,51,0.45);
-    font-size: 15px;
-  }
+      .no-results {
+        grid-column: 1 / -1;
+        text-align: center;
+        padding: 60px 20px;
+        color: rgba(27, 36, 51, 0.45);
+        font-size: 15px;
+      }
 
-  /* ===== FOOTER ===== */
-  .app-footer {
-    text-align: center;
-    padding: 24px 10px 12px;
-    font-size: 12px;
-    color: rgba(27,36,51,0.42);
-    letter-spacing: 0.6px;
-    border-top: 1px solid rgba(27,36,51,0.06);
-    margin-top: 16px;
-  }
+      /* ===== FOOTER ===== */
+      .app-footer {
+        text-align: center;
+        padding: 24px 10px 12px;
+        font-size: 12px;
+        color: rgba(27, 36, 51, 0.42);
+        letter-spacing: 0.6px;
+        border-top: 1px solid rgba(27, 36, 51, 0.06);
+        margin-top: 16px;
+      }
 
-  @media (max-width: 640px) {
-    header { padding: 14px 18px; }
-    .content { padding: 24px 16px 40px; }
-    .page-title h2 { font-size: 21px; }
-    .sports-grid { grid-template-columns: 1fr; }
-  }
-</style>
-</head>
-<body>
+      @media (max-width: 640px) {
+        header {
+          padding: 14px 18px;
+        }
+        .content {
+          padding: 24px 16px 40px;
+        }
+        .page-title h2 {
+          font-size: 21px;
+        }
+        .sports-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- HEADER -->
+    <header>
+      <div class="logo">
+        <img src="src/logo-after.png" alt="" class="logo-img" onerror="this.style.display = 'none'" />
+        <span class="brand">EL WASL <span>ACADEMY</span></span>
+      </div>
+    </header>
 
-<!-- HEADER -->
-<header>
-  <div class="logo">
-    <img src="src/logo-after.png" alt="" class="logo-img" onerror="this.style.display='none'">
-    <span class="brand">EL WASL <span>ACADEMY</span></span>
-  </div>
-</header>
+    <!-- CONTENT -->
+    <div class="content">
+      <div class="page-title">
+        <h2>الرياضات المتاحة</h2>
+        <p>اضغط على أي رياضة لعرض شروط القبول — الأسعار شهرية</p>
+      </div>
 
-<!-- CONTENT -->
-<div class="content">
-  <div class="page-title">
-    <h2>الرياضات المتاحة</h2>
-    <p>اضغط على أي رياضة لعرض شروط القبول — الأسعار شهرية</p>
-  </div>
+      <!-- TOOLBAR -->
+      <div class="toolbar">
+        <input type="text" class="search-box" id="search-input" placeholder="🔍 ابحث عن رياضة..." />
+        <div class="filter-pills" id="filter-pills">
+          <span class="pill active" data-cat="all">الكل</span>
+          <span class="pill" data-cat="جمباز">جمباز</span>
+          <span class="pill" data-cat="قتالية">رياضات قتالية</span>
+          <span class="pill" data-cat="لياقة">لياقة بدنية</span>
+        </div>
+      </div>
 
-  <!-- TOOLBAR -->
-  <div class="toolbar">
-    <input type="text" class="search-box" id="search-input" placeholder="🔍 ابحث عن رياضة...">
-    <div class="filter-pills" id="filter-pills">
-      <span class="pill active" data-cat="all">الكل</span>
-      <span class="pill" data-cat="جمباز">جمباز</span>
-      <span class="pill" data-cat="قتالية">رياضات قتالية</span>
-      <span class="pill" data-cat="لياقة">لياقة بدنية</span>
+      <!-- SPORTS GRID -->
+      <div class="sports-grid" id="sports-grid"></div>
     </div>
-  </div>
 
-  <!-- SPORTS GRID -->
-  <div class="sports-grid" id="sports-grid"></div>
-</div>
+    <footer class="app-footer">© 2026 EL WASL ACADEMY — جميع الحقوق محفوظة</footer>
 
-<footer class="app-footer">© 2026 EL WASL ACADEMY — جميع الحقوق محفوظة</footer>
+    <script>
+      /* ===== بيانات الرياضات — نفس رياضات السيستم ===== */
+      const sports = [
+        {
+          name: 'جمباز فني',
+          emoji: '🤸',
+          category: 'جمباز',
+          price: 1500,
+          sessions: 'من 8 إلى 16 حصة شهرياً حسب القطاع',
+          desc: 'رياضة تُنمّي المرونة والتوازن والقوة منذ الصغر عبر قطاعات متدرجة (مدارس — تجهيزي — فريق). تبني جسماً متناسقاً وتصحّح القوام وتُنمّي الجرأة والثقة.',
+          conditions: [
+            'اجتياز اختبار المرونة والتوازن',
+            'الفحص الطبي على العمود الفقري',
+            'تحديد القطاع المناسب (مدارس / تجهيزي / فريق)',
+            'إحضار الزي الرياضي المطاطي',
+            'الالتزام بعدد حصص القطاع',
+          ],
+        },
+        {
+          name: 'جمباز ايروبك',
+          emoji: '🩰',
+          category: 'جمباز',
+          price: 1400,
+          sessions: 'عدد الحصص حسب القطاع',
+          desc: 'مزيج بين الجمباز والحركات الإيقاعية على الموسيقى. يجمع بين اللياقة العالية والمرونة والأداء الفني، ويُنمّي الإحساس بالإيقاع والتناسق الحركي.',
+          conditions: [
+            'اجتياز اختبار اللياقة والمرونة',
+            'شهادة طبية حديثة',
+            'تحديد القطاع المناسب (مدارس / تجهيزي / فريق)',
+            'الالتزام بحضور التدريبات بانتظام',
+          ],
+        },
+        {
+          name: 'كاراتيه',
+          emoji: '🥋',
+          category: 'قتالية',
+          price: 1000,
+          sessions: '8 حصص شهرياً',
+          desc: 'فن قتالي ياباني يجمع بين الانضباط الذهني والقوة البدنية. يُعلّم الدفاع عن النفس والثقة بالنفس واحترام الآخرين عبر نظام الأحزمة المتدرج.',
+          conditions: [
+            'اللياقة البدنية الأساسية',
+            'شهادة طبية سليمة',
+            'إحضار بدلة الكاراتيه',
+            'الالتزام بآداب وقوانين اللعبة',
+          ],
+        },
+        {
+          name: 'كونغ فو ساندا',
+          emoji: '🐉',
+          category: 'قتالية',
+          price: 1050,
+          sessions: '8 حصص شهرياً',
+          desc: 'النسخة القتالية الحديثة من الكونغ فو الصيني، تعتمد على اللكم والركل والمسك والإسقاط. تبني قوة بدنية شاملة وسرعة رد فعل عالية.',
+          conditions: [
+            'الحد الأدنى للعمر 8 سنوات',
+            'كشف طبي شامل',
+            'إحضار واقيات التدريب',
+            'موافقة ولي الأمر للنزالات',
+          ],
+        },
+        {
+          name: 'كيك بوكس',
+          emoji: '🥊',
+          category: 'قتالية',
+          price: 1100,
+          sessions: '8 حصص شهرياً',
+          desc: 'رياضة قتالية تجمع بين لكمات الملاكمة وركلات الكاراتيه. تُحسّن اللياقة القلبية وتحرق السعرات وتبني سرعة وقوة في الجزئين العلوي والسفلي.',
+          conditions: [
+            'لياقة بدنية جيدة',
+            'كشف طبي على القلب والضغط',
+            'إحضار قفازات وواقي فم',
+            'الالتزام بتعليمات المدرب أثناء النزال',
+          ],
+        },
+        {
+          name: 'تايكوندو',
+          emoji: '🦵',
+          category: 'قتالية',
+          price: 1000,
+          sessions: '8 حصص شهرياً',
+          desc: 'فن قتالي كوري أولمبي يركّز على الركلات العالية والسرعة. يبني الانضباط واللياقة والقدرة على الدفاع عن النفس ضمن نظام أحزمة معتمد.',
+          conditions: [
+            'اللياقة البدنية للركلات العالية',
+            'كشف طبي على المفاصل',
+            'إحضار بدلة التايكوندو',
+            'احترام قوانين اللعبة والمنافس',
+          ],
+        },
+        {
+          name: 'كونغ فو اساليب',
+          emoji: '🀄',
+          category: 'قتالية',
+          price: 950,
+          sessions: 'حصص شهرية بالاتفاق',
+          desc: 'الأداء الفني التقليدي للكونغ فو: مجموعات حركية (أساليب) تُؤدّى بدقة وانسيابية. يُنمّي التركيز والمرونة والتحكم الكامل في الجسم.',
+          conditions: [
+            'اجتياز اختبار المرونة الأساسية',
+            'شهادة طبية حديثة',
+            'حفظ الأساليب المقررة لكل مستوى',
+            'الانتظام في الحضور',
+          ],
+        },
+        {
+          name: 'ملاكمه',
+          emoji: '🥊',
+          category: 'قتالية',
+          price: 1200,
+          sessions: 'حصص شهرية بالاتفاق',
+          desc: 'رياضة قتالية تبني القوة والسرعة والتحمّل. تُعلّم فنون الدفاع والهجوم مع تحسين اللياقة القلبية والثقة بالنفس تحت إشراف مدربين محترفين.',
+          conditions: [
+            'الحد الأدنى للعمر 12 سنة',
+            'كشف طبي شامل (القلب والضغط)',
+            'إحضار قفازات ملاكمة وواقي فم',
+            'موافقة ولي الأمر الخطية',
+          ],
+        },
+        {
+          name: 'موياي تاي',
+          emoji: '🇹🇭',
+          category: 'قتالية',
+          price: 1250,
+          sessions: '8 حصص شهرياً',
+          desc: 'فن الأعضاء الثمانية التايلاندي: لكمات، ركلات، كوع، وركبة. من أقوى الرياضات القتالية بدنياً ويبني تحمّلاً وصلابة استثنائية.',
+          conditions: [
+            'الحد الأدنى للعمر 12 سنة',
+            'لياقة بدنية عالية',
+            'كشف طبي شامل',
+            'إحضار واقيات كاملة (قفازات — ساق — فم)',
+          ],
+        },
+        {
+          name: 'كالستانكس',
+          emoji: '💪',
+          category: 'لياقة',
+          price: 900,
+          sessions: 'حصص شهرية بالاتفاق',
+          desc: 'تمارين قوة بوزن الجسم فقط: عقلة، متوازي، ضغط، وحركات متقدمة. تبني عضلات وظيفية قوية وتحكماً كاملاً في الجسم بدون أوزان.',
+          conditions: [
+            'اجتياز اختبار القوة الأساسي (عقلة / ضغط)',
+            'شهادة طبية سليمة',
+            'الحد الأدنى للعمر 10 سنوات',
+            'الالتزام بالتدرج في الحركات لتجنب الإصابة',
+          ],
+        },
+        {
+          name: 'فيتنس تخصصي',
+          emoji: '🏋️',
+          category: 'لياقة',
+          price: 800,
+          sessions: 'اشتراك مدارس أو تجهيزي',
+          desc: 'برنامج لياقة بدنية مُخصّص حسب الهدف: إعداد بدني للرياضيين (تجهيزي) أو لياقة عامة لطلبة المدارس. تدريبات مقننة بإشراف مدربين معتمدين.',
+          conditions: [
+            'تحديد نوع الاشتراك (مدارس / تجهيزي)',
+            'كشف طبي عام',
+            'قياسات بدنية أولية لتحديد البرنامج',
+            'الالتزام بالبرنامج التدريبي المحدد',
+          ],
+        },
+      ];
 
-<script>
-  /* ===== بيانات الرياضات — نفس رياضات السيستم ===== */
-  const sports = [
-    {
-      name: 'جمباز فني',
-      emoji: '🤸',
-      category: 'جمباز',
-      price: 1500,
-      sessions: 'من 8 إلى 16 حصة شهرياً حسب القطاع',
-      desc: 'رياضة تُنمّي المرونة والتوازن والقوة منذ الصغر عبر قطاعات متدرجة (مدارس — تجهيزي — فريق). تبني جسماً متناسقاً وتصحّح القوام وتُنمّي الجرأة والثقة.',
-      conditions: [
-        'اجتياز اختبار المرونة والتوازن',
-        'الفحص الطبي على العمود الفقري',
-        'تحديد القطاع المناسب (مدارس / تجهيزي / فريق)',
-        'إحضار الزي الرياضي المطاطي',
-        'الالتزام بعدد حصص القطاع'
-      ]
-    },
-    {
-      name: 'جمباز ايروبك',
-      emoji: '🩰',
-      category: 'جمباز',
-      price: 1400,
-      sessions: 'عدد الحصص حسب القطاع',
-      desc: 'مزيج بين الجمباز والحركات الإيقاعية على الموسيقى. يجمع بين اللياقة العالية والمرونة والأداء الفني، ويُنمّي الإحساس بالإيقاع والتناسق الحركي.',
-      conditions: [
-        'اجتياز اختبار اللياقة والمرونة',
-        'شهادة طبية حديثة',
-        'تحديد القطاع المناسب (مدارس / تجهيزي / فريق)',
-        'الالتزام بحضور التدريبات بانتظام'
-      ]
-    },
-    {
-      name: 'كاراتيه',
-      emoji: '🥋',
-      category: 'قتالية',
-      price: 1000,
-      sessions: '8 حصص شهرياً',
-      desc: 'فن قتالي ياباني يجمع بين الانضباط الذهني والقوة البدنية. يُعلّم الدفاع عن النفس والثقة بالنفس واحترام الآخرين عبر نظام الأحزمة المتدرج.',
-      conditions: [
-        'اللياقة البدنية الأساسية',
-        'شهادة طبية سليمة',
-        'إحضار بدلة الكاراتيه',
-        'الالتزام بآداب وقوانين اللعبة'
-      ]
-    },
-    {
-      name: 'كونغ فو ساندا',
-      emoji: '🐉',
-      category: 'قتالية',
-      price: 1050,
-      sessions: '8 حصص شهرياً',
-      desc: 'النسخة القتالية الحديثة من الكونغ فو الصيني، تعتمد على اللكم والركل والمسك والإسقاط. تبني قوة بدنية شاملة وسرعة رد فعل عالية.',
-      conditions: [
-        'الحد الأدنى للعمر 8 سنوات',
-        'كشف طبي شامل',
-        'إحضار واقيات التدريب',
-        'موافقة ولي الأمر للنزالات'
-      ]
-    },
-    {
-      name: 'كيك بوكس',
-      emoji: '🥊',
-      category: 'قتالية',
-      price: 1100,
-      sessions: '8 حصص شهرياً',
-      desc: 'رياضة قتالية تجمع بين لكمات الملاكمة وركلات الكاراتيه. تُحسّن اللياقة القلبية وتحرق السعرات وتبني سرعة وقوة في الجزئين العلوي والسفلي.',
-      conditions: [
-        'لياقة بدنية جيدة',
-        'كشف طبي على القلب والضغط',
-        'إحضار قفازات وواقي فم',
-        'الالتزام بتعليمات المدرب أثناء النزال'
-      ]
-    },
-    {
-      name: 'تايكوندو',
-      emoji: '🦵',
-      category: 'قتالية',
-      price: 1000,
-      sessions: '8 حصص شهرياً',
-      desc: 'فن قتالي كوري أولمبي يركّز على الركلات العالية والسرعة. يبني الانضباط واللياقة والقدرة على الدفاع عن النفس ضمن نظام أحزمة معتمد.',
-      conditions: [
-        'اللياقة البدنية للركلات العالية',
-        'كشف طبي على المفاصل',
-        'إحضار بدلة التايكوندو',
-        'احترام قوانين اللعبة والمنافس'
-      ]
-    },
-    {
-      name: 'كونغ فو اساليب',
-      emoji: '🀄',
-      category: 'قتالية',
-      price: 950,
-      sessions: 'حصص شهرية بالاتفاق',
-      desc: 'الأداء الفني التقليدي للكونغ فو: مجموعات حركية (أساليب) تُؤدّى بدقة وانسيابية. يُنمّي التركيز والمرونة والتحكم الكامل في الجسم.',
-      conditions: [
-        'اجتياز اختبار المرونة الأساسية',
-        'شهادة طبية حديثة',
-        'حفظ الأساليب المقررة لكل مستوى',
-        'الانتظام في الحضور'
-      ]
-    },
-    {
-      name: 'ملاكمه',
-      emoji: '🥊',
-      category: 'قتالية',
-      price: 1200,
-      sessions: 'حصص شهرية بالاتفاق',
-      desc: 'رياضة قتالية تبني القوة والسرعة والتحمّل. تُعلّم فنون الدفاع والهجوم مع تحسين اللياقة القلبية والثقة بالنفس تحت إشراف مدربين محترفين.',
-      conditions: [
-        'الحد الأدنى للعمر 12 سنة',
-        'كشف طبي شامل (القلب والضغط)',
-        'إحضار قفازات ملاكمة وواقي فم',
-        'موافقة ولي الأمر الخطية'
-      ]
-    },
-    {
-      name: 'موياي تاي',
-      emoji: '🇹🇭',
-      category: 'قتالية',
-      price: 1250,
-      sessions: '8 حصص شهرياً',
-      desc: 'فن الأعضاء الثمانية التايلاندي: لكمات، ركلات، كوع، وركبة. من أقوى الرياضات القتالية بدنياً ويبني تحمّلاً وصلابة استثنائية.',
-      conditions: [
-        'الحد الأدنى للعمر 12 سنة',
-        'لياقة بدنية عالية',
-        'كشف طبي شامل',
-        'إحضار واقيات كاملة (قفازات — ساق — فم)'
-      ]
-    },
-    {
-      name: 'كالستانكس',
-      emoji: '💪',
-      category: 'لياقة',
-      price: 900,
-      sessions: 'حصص شهرية بالاتفاق',
-      desc: 'تمارين قوة بوزن الجسم فقط: عقلة، متوازي، ضغط، وحركات متقدمة. تبني عضلات وظيفية قوية وتحكماً كاملاً في الجسم بدون أوزان.',
-      conditions: [
-        'اجتياز اختبار القوة الأساسي (عقلة / ضغط)',
-        'شهادة طبية سليمة',
-        'الحد الأدنى للعمر 10 سنوات',
-        'الالتزام بالتدرج في الحركات لتجنب الإصابة'
-      ]
-    },
-    {
-      name: 'فيتنس تخصصي',
-      emoji: '🏋️',
-      category: 'لياقة',
-      price: 800,
-      sessions: 'اشتراك مدارس أو تجهيزي',
-      desc: 'برنامج لياقة بدنية مُخصّص حسب الهدف: إعداد بدني للرياضيين (تجهيزي) أو لياقة عامة لطلبة المدارس. تدريبات مقننة بإشراف مدربين معتمدين.',
-      conditions: [
-        'تحديد نوع الاشتراك (مدارس / تجهيزي)',
-        'كشف طبي عام',
-        'قياسات بدنية أولية لتحديد البرنامج',
-        'الالتزام بالبرنامج التدريبي المحدد'
-      ]
-    }
-  ];
+      /* ===== عرض الرياضات ===== */
+      const grid = document.getElementById('sports-grid');
+      const searchInput = document.getElementById('search-input');
+      const pills = document.querySelectorAll('.pill');
+      let activeCat = 'all';
 
-  /* ===== عرض الرياضات ===== */
-  const grid = document.getElementById('sports-grid');
-  const searchInput = document.getElementById('search-input');
-  const pills = document.querySelectorAll('.pill');
-  let activeCat = 'all';
+      function render() {
+        const term = searchInput.value.trim().toLowerCase();
+        const list = sports.filter(s => {
+          const matchCat = activeCat === 'all' || s.category === activeCat;
+          const matchTerm = s.name.toLowerCase().includes(term) || s.desc.toLowerCase().includes(term);
+          return matchCat && matchTerm;
+        });
 
-  function render() {
-    const term = searchInput.value.trim().toLowerCase();
-    const list = sports.filter(s => {
-      const matchCat = activeCat === 'all' || s.category === activeCat;
-      const matchTerm = s.name.toLowerCase().includes(term) || s.desc.toLowerCase().includes(term);
-      return matchCat && matchTerm;
-    });
+        if (list.length === 0) {
+          grid.innerHTML = '<div class="no-results">لا توجد رياضات مطابقة لبحثك 🔍</div>';
+          return;
+        }
 
-    if (list.length === 0) {
-      grid.innerHTML = '<div class="no-results">لا توجد رياضات مطابقة لبحثك 🔍</div>';
-      return;
-    }
-
-    grid.innerHTML = list.map(s => `
+        grid.innerHTML = list
+          .map(
+            s => `
       <article class="sport-card" onclick="toggleCard(this)">
         <div class="sport-head">
           <div class="price-tag">${s.price} <small>ج/شهرياً</small></div>
@@ -520,30 +614,31 @@
           </div>
         </div>
       </article>
-    `).join('');
-  }
+    `,
+          )
+          .join('');
+      }
 
-  /* فتح/قفل الشروط — كارت واحد مفتوح في نفس الوقت */
-  function toggleCard(card) {
-    const wasOpen = card.classList.contains('open');
-    document.querySelectorAll('.sport-card.open').forEach(c => c.classList.remove('open'));
-    if (!wasOpen) card.classList.add('open');
-  }
+      /* فتح/قفل الشروط — كارت واحد مفتوح في نفس الوقت */
+      function toggleCard(card) {
+        const wasOpen = card.classList.contains('open');
+        document.querySelectorAll('.sport-card.open').forEach(c => c.classList.remove('open'));
+        if (!wasOpen) card.classList.add('open');
+      }
 
-  /* ===== الفلاتر والبحث ===== */
-  pills.forEach(pill => {
-    pill.addEventListener('click', () => {
-      pills.forEach(p => p.classList.remove('active'));
-      pill.classList.add('active');
-      activeCat = pill.dataset.cat;
+      /* ===== الفلاتر والبحث ===== */
+      pills.forEach(pill => {
+        pill.addEventListener('click', () => {
+          pills.forEach(p => p.classList.remove('active'));
+          pill.classList.add('active');
+          activeCat = pill.dataset.cat;
+          render();
+        });
+      });
+
+      searchInput.addEventListener('input', render);
+
       render();
-    });
-  });
-
-  searchInput.addEventListener('input', render);
-
-  render();
-</script>
-
-</body>
+    </script>
+  </body>
 </html>
