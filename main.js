@@ -318,6 +318,43 @@ function toggleEditSportLevel() {
   updateEditLevelVisibility();
 }
 
+// ---- Card-code editing (mirrors the registration code chips). Lets you give a
+// player a new card by swapping their code, WITHOUT touching their id — so the
+// attendance log and payments, which are keyed by the id (not the card code),
+// stay intact. Only scanning and card printing use `codes`. ----
+let editCodes = [];
+let editingTraineeId = '';
+function addEditCode() {
+  const input = document.getElementById('edit-card-code');
+  const code = (input.value || '').trim();
+  if (!code) {
+    showNotification('اكتب الكود أولاً', 'warning');
+    return;
+  }
+  if (editCodes.includes(code)) {
+    showNotification('الكود مضاف بالفعل', 'warning');
+    return;
+  }
+  // A code already used by ANOTHER player is rejected (the player's own is fine).
+  const other = findTraineeByCode(code);
+  if (other && String(other.id) !== String(editingTraineeId)) {
+    showNotification('هذا الكود مستخدم بالفعل للاعب آخر', 'warning');
+    return;
+  }
+  editCodes.push(code);
+  input.value = '';
+  renderEditCodesChips();
+}
+function removeEditCode(i) {
+  editCodes.splice(i, 1);
+  renderEditCodesChips();
+}
+function renderEditCodesChips() {
+  const box = document.getElementById('edit-codes-list');
+  if (!box) return;
+  box.innerHTML = chipsHTML(editCodes, 'removeEditCode');
+}
+
 // Unique document id for records stored with an explicit id (payments),
 // so each one can be edited/deleted individually later.
 function genDocId(prefix) {
@@ -990,6 +1027,8 @@ function viewTrainee(index) {
 function editTrainee(index) {
   const t = data.trainees[index];
   editSports = traineeSports(t).slice(); // seed the multi-sport chips
+  editCodes = traineeCodes(t).slice(); // seed the card-code chips
+  editingTraineeId = t.id; // so the uniqueness check skips the player's own codes
   openModal(
     `تعديل بيانات ${t.name}`,
     `
@@ -1064,6 +1103,15 @@ function editTrainee(index) {
  <label>ملاحظات</label>
  <input type="text" id="edit-notes" value="${esc(t.notes || '')}">
  </div>
+ <div class="form-group" style="grid-column: 1 / -1;">
+ <label>أكواد الكروت (لإعطاء اللاعب كرت جديد)</label>
+ <div style="display:flex; gap:8px;">
+ <input type="text" id="edit-card-code" placeholder="اكتب كود الكرت الجديد" style="flex:1;">
+ <button type="button" class="btn btn-outline btn-sm" onclick="addEditCode()">➕ أضف</button>
+ </div>
+ <div id="edit-codes-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
+ <p style="color: rgba(48,56,65,0.5); font-size: 11px; margin-top:6px;">امسح الكود القديم (×) وأضف الجديد. الحضور والمدفوعات السابقة لا تتأثر.</p>
+ </div>
  </div>
  <div style="border-top: 1px solid rgba(48,56,65,0.1); margin-top: 16px; padding-top: 14px;">
  <div style="font-weight: 700; color: var(--accent); margin-bottom: 4px;">خدمات إضافية</div>
@@ -1087,6 +1135,7 @@ function editTrainee(index) {
  `,
   );
   renderEditSportsChips();
+  renderEditCodesChips();
 }
 
 function saveTraineeEdit(index) {
@@ -1133,6 +1182,20 @@ function saveTraineeEdit(index) {
   // If the responsible coach changed, move the commission value of the
   // not-yet-used part (remaining sessions/days) to the new coach.
   recordCoachTransfer(t, oldCoach, t.trainer);
+
+  // Card codes: persist the edited list. Include a code still typed but not
+  // yet added as a chip (mirrors how the sport select is handled above). Keep
+  // the id itself out of harm's way — codes drive scanning/printing only.
+  const codes = editCodes.slice();
+  const typedCode = (val('edit-card-code') || '').trim();
+  if (
+    typedCode &&
+    !codes.includes(typedCode) &&
+    !(findTraineeByCode(typedCode) && String(findTraineeByCode(typedCode).id) !== String(t.id))
+  ) {
+    codes.push(typedCode);
+  }
+  t.codes = codes;
 
   // Apply add-on changes (any added/increased service is billed as income).
   const today = todayAr();
@@ -1995,11 +2058,15 @@ function openPortraitCardsSheet(title, slotsHtml) {
   win.document.close();
 }
 
-// Print every active player's card(s) on A4 sheets (optionally one branch).
-// Each code produces a front slot + a back slot (barcode), in the new design.
-function printTraineeCardsSheet(branch) {
+// Print players' card(s) on A4 sheets (optionally one branch). Each code
+// produces a front slot + a back slot (barcode), in the new design.
+// activeOnly = true keeps only players whose subscription is still valid
+// (not expired: days left / sessions left / frozen) — i.e. the active players
+// and anyone who still has time on their subscription.
+function printTraineeCardsSheet(branch, activeOnly) {
   const logoUrl = new URL('src/logo-after.png', location.href).href;
-  const list = data.trainees.filter(t => t.type === 'subscription' && (!branch || (t.branch || '') === branch));
+  let list = data.trainees.filter(t => t.type === 'subscription' && (!branch || (t.branch || '') === branch));
+  if (activeOnly) list = list.filter(t => !subInfo(t).expired);
   const slots = [];
   list.forEach(t =>
     traineeCodes(t).forEach(code => {
@@ -2010,10 +2077,10 @@ function printTraineeCardsSheet(branch) {
     }),
   );
   if (!slots.length) {
-    showNotification('لا توجد كروت لاعبين للطباعة', 'warning');
+    showNotification(activeOnly ? 'لا يوجد لاعبون نشطون للطباعة' : 'لا توجد كروت لاعبين للطباعة', 'warning');
     return;
   }
-  openPortraitCardsSheet('كروت اللاعبين', slots.join(''));
+  openPortraitCardsSheet(activeOnly ? 'كروت اللاعبين النشطين' : 'كروت اللاعبين', slots.join(''));
 }
 
 // Print every staff member's card on A4 sheets (optionally one branch).

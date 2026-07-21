@@ -19,3 +19,6 @@ server-local.log
 *.xlsm
 import-june-july-mariotia.sql
 fix-move-july2-to-june.sql
+# Generated card-renumbering artifacts (carry real player names/ids)
+new-card-codes-mapping.csv
+apply-new-card-codes.sql
