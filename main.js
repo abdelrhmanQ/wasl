@@ -1897,14 +1897,6 @@ function cardBackHTML(code, logoUrl, extraStyle) {
  </div>`;
 }
 
-// Front + back for ONE card (single-card window): each face on its own page.
-function portraitCardHTML(t, code, logoUrl) {
-  return (
-    cardFrontHTML(t, code, logoUrl, 'page-break-after: always;') +
-    cardBackHTML(code, logoUrl, 'page-break-after: always;')
-  );
-}
-
 // Small script that renders every <svg class="barcode"> from its data-code,
 // loading JsBarcode from the local vendor file first (offline), CDN as fallback.
 function barcodeRenderScript(printAfter) {
@@ -1922,36 +1914,20 @@ function barcodeRenderScript(printAfter) {
  else { var s=document.createElement('script'); s.src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"; s.onload=renderBarcodes; s.onerror=renderBarcodes; document.head.appendChild(s); }`;
 }
 
-// Opens a print window with the new portrait membership card per CARD CODE the
-// player holds (multi-sport players get one card per code). Front carries the
-// player data (name, sport from the code, branch); back is white with a barcode.
+// Prints the portrait membership card for every card code the player holds
+// (multi-sport players get one per code): front = player data, back = barcode.
+// Routes through the shared sheet printer, so it honours the current print size.
 function openCardWindow(t) {
   const logoUrl = new URL('src/logo-after.png', location.href).href;
-  const bcUrl = new URL('vendor/jsbarcode.min.js', location.href).href;
   const codes = traineeCodes(t);
   const list = codes.length ? codes : [''];
-  const win = window.open('', '_blank');
-  if (!win) {
-    showNotification('فعّل السماح بالنوافذ المنبثقة لطباعة البطاقة', 'warning');
-    return;
-  }
-  const cards = list.map(code => portraitCardHTML(t, code, logoUrl)).join('');
-  win.document.write(`
- <html dir="rtl" lang="ar"><head><title>بطاقة العضوية - ${esc(t.id)}</title>
- <meta charset="UTF-8"> <script src="${bcUrl}"><\/script>
- <style>
- @page { size: 30mm 60mm; margin: 0; }
- * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
- html, body { margin: 0; padding: 0; background: #ffffff; }
- ${PORTRAIT_CARD_CSS}
- </style>
- </head>
- <body>
- ${cards}
- <script>window.onload = function(){ ${barcodeRenderScript(true)} };<\/script>
- </body></html>
- `);
-  win.document.close();
+  const slots = list
+    .map(
+      code =>
+        `<div class="slot">${cardFrontHTML(t, code, logoUrl, '')}</div><div class="slot">${cardBackHTML(code, logoUrl, '')}</div>`,
+    )
+    .join('');
+  openCardSheet(`بطاقة العضوية - ${t.id}`, slots);
 }
 
 // ==================== BATCH CARD PRINTING (A4 sheets) ====================
@@ -2029,20 +2005,63 @@ function openCardsSheet(title, cardCss, slotsHtml) {
   win.document.close();
 }
 
-// A4 sheet shell for the PORTRAIT keychain tags: 30x60mm slots with cut guides,
-// and a barcode renderer (front slots have no barcode; back slots do).
-const SHEET_PORTRAIT_BASE_CSS = `
+// ==================== CARD PRINT SIZE ====================
+// The one portrait card design can print at several physical sizes. Each size
+// is a portrait box (width × height in mm); the 30×60 card is scaled to FIT it
+// (uniform, no distortion) so it just prints bigger/smaller. The chosen size is
+// global + persisted, so it applies to EVERY card print — players, blank
+// pre-coded cards, and the single-card window.
+const CARD_PRINT_SIZES = {
+  keychain: { label: 'ميدالية 3×6 سم', w: 30, h: 60 },
+  '85x55': { label: '8.5 × 5.5 سم', w: 55, h: 85 },
+  '60x40': { label: '6 × 4 سم', w: 40, h: 60 },
+};
+let cardPrintSizeKey = CARD_PRINT_SIZES[localStorage.getItem('card-print-size')]
+  ? localStorage.getItem('card-print-size')
+  : 'keychain';
+function currentCardSize() {
+  return CARD_PRINT_SIZES[cardPrintSizeKey] || CARD_PRINT_SIZES.keychain;
+}
+function setCardPrintSize(key) {
+  cardPrintSizeKey = CARD_PRINT_SIZES[key] ? key : 'keychain';
+  try {
+    localStorage.setItem('card-print-size', cardPrintSizeKey);
+  } catch (e) {
+    /* storage full — the in-memory choice still applies this session */
+  }
+  // Keep every size dropdown on the page in sync with the shared choice.
+  document.querySelectorAll('.card-size-select').forEach(s => {
+    s.value = cardPrintSizeKey;
+  });
+}
+// Fills every .card-size-select in the page from CARD_PRINT_SIZES (single
+// source of truth) and selects the current size. Called once on startup.
+function initCardSizeSelects() {
+  const opts = Object.entries(CARD_PRINT_SIZES)
+    .map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`)
+    .join('');
+  document.querySelectorAll('.card-size-select').forEach(s => {
+    s.innerHTML = opts;
+    s.value = cardPrintSizeKey;
+  });
+}
+
+// Opens an A4 print window laying the given card faces out at the CURRENT print
+// size, with dashed cut guides, renders every back-face barcode, then prints.
+// The card keeps its design and is scaled to fit the chosen slot. Offline-safe
+// (local JsBarcode vendor lib). The single portrait-card print path.
+function openCardSheet(title, slotsHtml) {
+  const size = currentCardSize();
+  const scale = Math.min(size.w / 30, size.h / 60); // fit the 30×60 card, no distortion
+  const sizeNote = cardPrintSizeKey === 'keychain' ? '' : ` — ${size.label}`;
+  const sheetCss = `
  @page { size: A4; margin: 8mm; }
  * { box-sizing: border-box; margin:0; padding:0; font-family:'Segoe UI',Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
  html, body { background:#fff; }
  .sheet { display:flex; flex-wrap:wrap; gap:4mm; align-content:flex-start; }
- .slot { width:30mm; height:60mm; break-inside:avoid; border-radius:3mm; overflow:hidden; outline:0.2mm dashed #b0b0b0; }
- .slot .card { border-radius:5mm; }
+ .slot { width:${size.w}mm; height:${size.h}mm; display:flex; align-items:center; justify-content:center; break-inside:avoid; border-radius:3mm; overflow:hidden; outline:0.2mm dashed #b0b0b0; }
+ .slot .card { transform: scale(${scale}); border-radius:5mm; }
  `;
-
-// Opens an A4 print window arranging the portrait card faces, loads JsBarcode,
-// renders every back-face barcode, then prints. Offline-safe (local vendor lib).
-function openPortraitCardsSheet(title, slotsHtml) {
   const bcUrl = new URL('vendor/jsbarcode.min.js', location.href).href;
   const win = window.open('', '_blank');
   if (!win) {
@@ -2050,16 +2069,16 @@ function openPortraitCardsSheet(title, slotsHtml) {
     return;
   }
   win.document.write(`
- <html dir="rtl" lang="ar"><head><title>${esc(title)}</title><meta charset="UTF-8"> <script src="${bcUrl}"><\/script>
- <style>${SHEET_PORTRAIT_BASE_CSS}${PORTRAIT_CARD_CSS}</style></head>
+ <html dir="rtl" lang="ar"><head><title>${esc(title + sizeNote)}</title><meta charset="UTF-8"> <script src="${bcUrl}"><\/script>
+ <style>${sheetCss}${PORTRAIT_CARD_CSS}</style></head>
  <body><div class="sheet">${slotsHtml}</div>
  <script>window.onload = function(){ ${barcodeRenderScript(true)} };<\/script>
  </body></html>`);
   win.document.close();
 }
 
-// Print players' card(s) on A4 sheets (optionally one branch). Each code
-// produces a front slot + a back slot (barcode), in the new design.
+// Print players' card(s) on A4 sheets (optionally one branch), at the current
+// print size. Each code produces a front slot + a back slot (barcode).
 // activeOnly = true keeps only players whose subscription is still valid
 // (not expired: days left / sessions left / frozen) — i.e. the active players
 // and anyone who still has time on their subscription.
@@ -2080,7 +2099,7 @@ function printTraineeCardsSheet(branch, activeOnly) {
     showNotification(activeOnly ? 'لا يوجد لاعبون نشطون للطباعة' : 'لا توجد كروت لاعبين للطباعة', 'warning');
     return;
   }
-  openPortraitCardsSheet(activeOnly ? 'كروت اللاعبين النشطين' : 'كروت اللاعبين', slots.join(''));
+  openCardSheet(activeOnly ? 'كروت اللاعبين النشطين' : 'كروت اللاعبين', slots.join(''));
 }
 
 // Print every staff member's card on A4 sheets (optionally one branch).
@@ -5569,7 +5588,7 @@ function printBlankCards() {
     slots.push(`<div class="slot">${cardBackHTML(code, logoUrl, '')}</div>`);
   });
   const groupText = isGymSport(sport) ? `${sport} • ${sector}` : sport;
-  openPortraitCardsSheet(`كروت ${groupText} - ${branch} (${qty})`, slots.join(''));
+  openCardSheet(`كروت ${groupText} - ${branch} (${qty})`, slots.join(''));
 }
 
 // Normalize any stored date (Arabic or ISO) to a "YYYY-MM-DD" key, so a
@@ -7109,6 +7128,7 @@ async function startApp(user) {
 
   applyRolePermissions(currentRole);
   initCollapsibleCards();
+  initCardSizeSelects();
 }
 
 // ==================== COLLAPSIBLE CARDS & TABLE FILTERS ====================

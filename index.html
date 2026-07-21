@@ -731,6 +731,17 @@
               >
                 🖨️ طباعة كروت النشطين فقط (A4)
               </button>
+              <label
+                style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--secondary)"
+                title="مقاس طباعة الكرت — يُطبَّق على كل أوامر طباعة الكروت"
+              >
+                📐 مقاس الكرت:
+                <select
+                  class="card-size-select"
+                  onchange="setCardPrintSize(this.value)"
+                  style="padding: 8px 10px; border-radius: 8px; border: 1px solid var(--secondary)"
+                ></select>
+              </label>
             </div>
             <div class="table-container">
               <table>
@@ -787,6 +798,10 @@
               <div class="form-group" style="max-width: 140px; margin-bottom: 0">
                 <label>عدد الكروت</label>
                 <input type="number" id="blank-cards-qty" value="10" min="1" max="1000" />
+              </div>
+              <div class="form-group" style="max-width: 180px; margin-bottom: 0">
+                <label>مقاس الطباعة</label>
+                <select class="card-size-select" onchange="setCardPrintSize(this.value)"></select>
               </div>
               <button class="btn btn-primary" onclick="printBlankCards()">طباعة الكروت</button>
             </div>
