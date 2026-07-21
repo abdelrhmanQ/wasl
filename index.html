@@ -1221,6 +1221,17 @@
                 <input type="date" id="staff-report-date" />
               </div>
               <button class="btn btn-primary" onclick="printStaffAttendance()">طباعة PDF (كل فرع في صفحة)</button>
+              <label
+                style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--secondary)"
+                title="مقاس طباعة الكرت — يُطبَّق على كل أوامر طباعة الكروت"
+              >
+                📐 مقاس الكرت:
+                <select
+                  class="card-size-select"
+                  onchange="setCardPrintSize(this.value)"
+                  style="padding: 8px 10px; border-radius: 8px; border: 1px solid var(--secondary)"
+                ></select>
+              </label>
               <button
                 class="btn btn-primary"
                 onclick="printStaffCardsSheet()"

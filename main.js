@@ -1855,22 +1855,21 @@ const PORTRAIT_CARD_CSS = `
  .card.back .b-id { font-family: 'Courier New', monospace; font-size: 9px; font-weight: 700; letter-spacing: 1px; color: #111; }
  `;
 
-// FRONT face of one membership card: logo, academy name, the sport (read from
-// the code) and branch in ENGLISH, the code, then the academy's contacts. No
-// player name. `extraStyle` lets the caller add a page break (single window).
-function cardFrontHTML(t, code, logoUrl, extraStyle) {
-  const sport = sportForCode(code) || traineeSports(t)[0] || '';
-  const sportTxt = sport ? sportEn(sport) : '';
-  const branchTxt = t.branch ? branchEn(t.branch) : '';
+// FRONT face of one membership card: logo, academy name, the given info rows,
+// the code, then the academy's contacts. `rows` is [{k, v}] — only rows with a
+// value are shown. Player and staff cards share this; only their rows differ.
+// `extraStyle` lets the caller add a page break (single window).
+function cardFaceHTML(rows, code, logoUrl, extraStyle) {
+  const rowsHtml = rows
+    .filter(r => r.v)
+    .map(r => `<div class="row"><span class="k">${esc(r.k)}</span><span class="v">${esc(r.v)}</span></div>`)
+    .join('');
   return `
  <div class="card front" style="${extraStyle || ''}">
  <img class="logo" src="${logoUrl}" alt="" onerror="this.style.display='none';">
  <div class="academy"><span class="w">El Wasl</span> <span class="a">ACADEMY</span></div>
  <div class="divider"></div>
- <div class="rows">
- ${sportTxt ? `<div class="row"><span class="k">Sport</span><span class="v">${esc(sportTxt)}</span></div>` : ''}
- ${branchTxt ? `<div class="row"><span class="k">Branch</span><span class="v">${esc(branchTxt)}</span></div>` : ''}
- </div>
+ <div class="rows">${rowsHtml}</div>
  <div class="code">${esc(code)}</div>
  <div class="contact">
  <div class="col col-left">
@@ -1883,6 +1882,43 @@ function cardFrontHTML(t, code, logoUrl, extraStyle) {
  </div>
  </div>
  </div>`;
+}
+
+// Player FRONT: Sport (read from the code) + Branch, in English.
+function cardFrontHTML(t, code, logoUrl, extraStyle) {
+  const sport = sportForCode(code) || traineeSports(t)[0] || '';
+  return cardFaceHTML(
+    [
+      { k: 'Sport', v: sport ? sportEn(sport) : '' },
+      { k: 'Branch', v: t.branch ? branchEn(t.branch) : '' },
+    ],
+    code,
+    logoUrl,
+    extraStyle,
+  );
+}
+
+// The branches a staff member's card lists: the multi-branch `branches` array
+// if set, else their single branch — so one coach's card can show every branch
+// they work at.
+function staffBranches(e) {
+  const list = Array.isArray(e.branches) && e.branches.length ? e.branches : [e.branch];
+  return list.filter(Boolean);
+}
+
+// Staff FRONT: the SAME design as the player card, only the rows differ —
+// Role + the branch(es) the staff member works at.
+function staffCardFrontHTML(e, code, logoUrl, extraStyle) {
+  const branchTxt = staffBranches(e).map(branchEn).filter(Boolean).join(' / ');
+  return cardFaceHTML(
+    [
+      { k: 'Role', v: e.role || '' },
+      { k: 'Branch', v: branchTxt },
+    ],
+    code,
+    logoUrl,
+    extraStyle,
+  );
 }
 
 // BACK face: white — nothing but the barcode (rotated along the card's length)
@@ -1931,78 +1967,19 @@ function openCardWindow(t) {
 }
 
 // ==================== BATCH CARD PRINTING (A4 sheets) ====================
-// The single-card windows print one 90x56mm page per card, which forces the
-// print shop to guess an N-up layout (and shrinks the cards). These batch
-// printers instead lay many cards, at their true size, onto A4 pages with
-// light dashed cut guides — so "what they see is what prints". QR is loaded
-// from the local vendor file first (works offline), CDN only as a fallback.
+// Cards print onto A4 pages with dashed cut guides (front + barcode back), at
+// the size chosen in the size dropdown — see openCardSheet below.
 
-// A4 page + grid shell shared by both sheet printers.
-const SHEET_BASE_CSS = `
- @page { size: A4; margin: 8mm; }
- * { box-sizing: border-box; margin:0; padding:0; font-family:'Segoe UI',Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
- html, body { background:#fff; }
- .sheet { display:flex; flex-wrap:wrap; gap:4mm; align-content:flex-start; }
- .slot { width:90mm; height:56mm; break-inside:avoid; outline:0.2mm dashed #b0b0b0; }
- `;
-
-// Staff card look (deep-gold accent), colours inlined (constant per staff card).
-const STAFF_CARD_CSS = `
- .scard { position: relative; width: 90mm; height: 56mm; overflow: hidden; background: radial-gradient(60mm 40mm at 88% 8%, #C9A22726, transparent 60%), linear-gradient(135deg, #0E141C 0%, #161D2B 60%, #090C12 100%); border-radius: 8px; padding: 4.5mm 5mm; display: flex; flex-direction: column; justify-content: space-between; color: #E9EDF3; }
- .scard::before { content: ''; position: absolute; inset: 1.1mm; border: 0.5mm solid #C9A227; border-radius: 6px; pointer-events: none; }
- .scard::after { content: ''; position: absolute; top: 0; right: 0; left: 0; height: 1.6mm; background: #C9A227; }
- .s-top { display: flex; justify-content: space-between; align-items: center; z-index: 1; }
- .club-name { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 1px; }
- .club-name span { color: #C9A227; }
- .club-sub { font-size: 8px; letter-spacing: 2px; color: #C9A227; margin-top: 1.5mm; font-weight: 700; }
- .s-logo { height: 12mm; width: auto; }
- .s-divider { height: 0.3mm; background: linear-gradient(90deg, transparent, #C9A227, transparent); margin: 1mm 0; z-index: 1; }
- .s-body { display: flex; justify-content: space-between; align-items: center; gap: 4mm; z-index: 1; }
- .s-info { flex: 1; min-width: 0; }
- .lbl { font-size: 6.5px; letter-spacing: 1px; color: rgba(233,237,243,0.5); text-transform: uppercase; }
- .s-name { font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 1mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
- .s-role { font-size: 9px; color: #C9A227; font-weight: 600; margin-bottom: 1.5mm; }
- .s-code { font-size: 13px; font-family: 'Courier New', monospace; letter-spacing: 1px; color: #E9EDF3; font-weight: 700; }
- .s-qr { background: #fff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm #C9A227; }
- .s-footer { font-size: 6.5px; color: #C9A227; text-align: center; letter-spacing: 0.5px; z-index: 1; }
- `;
-
-// One staff card as an A4-sheet slot.
-function staffCardSlot(e, logoUrl) {
-  const code = e.code || '';
-  return `<div class="slot"><div class="scard">
- <div class="s-top"><div class="scard-brand"><div class="club-name">El Wasl <span>Academy</span></div><div class="club-sub">بطاقة موظف</div></div><img class="s-logo" src="${logoUrl}" alt="" onerror="this.style.display='none'"></div>
- <div class="s-divider"></div>
- <div class="s-body"><div class="s-info"><div class="lbl">الاسم</div><div class="s-name">${esc(e.name)}</div><div class="s-role">${esc(e.role || '-')} • ${esc(e.branch || 'غير محدد')}</div><div class="lbl">الكود</div><div class="s-code">${esc(code)}</div></div><div class="s-qr"><div class="qr" data-code="${esc(code)}"></div></div></div>
- <div class="s-footer">امسح الكود لتسجيل الحضور والانصراف</div>
- </div></div>`;
-}
-
-// Opens a print window that arranges the given card slots on A4 pages and,
-// once the QR library is ready, renders every QR then triggers print.
-function openCardsSheet(title, cardCss, slotsHtml) {
-  const qrUrl = new URL('vendor/qrcode.min.js', location.href).href;
+// Opens a blank popup for printing, surfacing the popup-blocked case in one
+// place. Returns the window, or null if the browser blocked it. Callers then
+// write their document and call win.document.close().
+function openPrintWindow(blockedMsg) {
   const win = window.open('', '_blank');
   if (!win) {
-    showNotification('فعّل السماح بالنوافذ المنبثقة للطباعة', 'warning');
-    return;
+    showNotification(blockedMsg || 'فعّل السماح بالنوافذ المنبثقة للطباعة', 'warning');
+    return null;
   }
-  win.document.write(`
- <html dir="rtl" lang="ar"><head><title>${esc(title)}</title><meta charset="UTF-8"> <script src="${qrUrl}"><\/script>
- <style>${SHEET_BASE_CSS}${cardCss}</style></head>
- <body><div class="sheet">${slotsHtml}</div>
- <script>
- window.onload = function() {
- function render() {
- if (window.QRCode) document.querySelectorAll('.qr').forEach(function(el){ new QRCode(el, { text: el.getAttribute('data-code'), width: 96, height: 96, colorDark: "#1B2433", colorLight: "#ffffff" }); });
- setTimeout(function(){ window.print(); }, 500);
- }
- if (window.QRCode) render();
- else { var s = document.createElement('script'); s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload = render; s.onerror = render; document.head.appendChild(s); }
- };
- <\/script>
- </body></html>`);
-  win.document.close();
+  return win;
 }
 
 // ==================== CARD PRINT SIZE ====================
@@ -2054,20 +2031,24 @@ function openCardSheet(title, slotsHtml) {
   const size = currentCardSize();
   const scale = Math.min(size.w / 30, size.h / 60); // fit the 30×60 card, no distortion
   const sizeNote = cardPrintSizeKey === 'keychain' ? '' : ` — ${size.label}`;
+  // Lay the cards in a centred grid at their TRUE (undistorted) size, each the
+  // exact scaled card, with a small gap between them and a thin outline marking
+  // each card's edge. Cutting happens IN the gap (never on the card), so a
+  // slightly-off cut lands in the whitespace instead of clipping a card. The
+  // outline also makes the white barcode backs visible on white paper.
+  const cardW = 30 * scale;
+  const cardH = 60 * scale;
   const sheetCss = `
  @page { size: A4; margin: 8mm; }
  * { box-sizing: border-box; margin:0; padding:0; font-family:'Segoe UI',Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
  html, body { background:#fff; }
- .sheet { display:flex; flex-wrap:wrap; gap:4mm; align-content:flex-start; }
- .slot { width:${size.w}mm; height:${size.h}mm; display:flex; align-items:center; justify-content:center; break-inside:avoid; border-radius:3mm; overflow:hidden; outline:0.2mm dashed #b0b0b0; }
- .slot .card { transform: scale(${scale}); border-radius:5mm; }
+ .sheet { display:flex; flex-wrap:wrap; justify-content:center; align-content:flex-start; gap:2.5mm; }
+ .slot { width:${cardW}mm; height:${cardH}mm; display:flex; align-items:center; justify-content:center; break-inside:avoid; overflow:hidden; outline:0.15mm solid #c4c4c4; }
+ .slot .card { transform: scale(${scale}); border-radius:0; }
  `;
   const bcUrl = new URL('vendor/jsbarcode.min.js', location.href).href;
-  const win = window.open('', '_blank');
-  if (!win) {
-    showNotification('فعّل السماح بالنوافذ المنبثقة للطباعة', 'warning');
-    return;
-  }
+  const win = openPrintWindow();
+  if (!win) return;
   win.document.write(`
  <html dir="rtl" lang="ar"><head><title>${esc(title + sizeNote)}</title><meta charset="UTF-8"> <script src="${bcUrl}"><\/script>
  <style>${sheetCss}${PORTRAIT_CARD_CSS}</style></head>
@@ -2111,7 +2092,13 @@ function printStaffCardsSheet(branch) {
     showNotification('لا توجد كروت موظفين للطباعة (تأكد من وجود أكواد)', 'warning');
     return;
   }
-  openCardsSheet('كروت الموظفين', STAFF_CARD_CSS, list.map(e => staffCardSlot(e, logoUrl)).join(''));
+  const slots = list
+    .map(
+      e =>
+        `<div class="slot">${staffCardFrontHTML(e, e.code, logoUrl, '')}</div><div class="slot">${cardBackHTML(e.code, logoUrl, '')}</div>`,
+    )
+    .join('');
+  openCardSheet('كروت الموظفين', slots);
 }
 
 // ==================== ATTENDANCE ====================
@@ -2872,6 +2859,15 @@ function editEmployee(id) {
  </div>
  <div class="form-group"><label>الراتب الشهري (ج.م)</label><input type="number" id="edit-emp-salary" value="${num(e.salary)}"></div>
  <div class="form-group"><label>الفرع</label><select id="edit-emp-branch">${branchOptionsHTML(e.branch)}</select></div>
+ <div class="form-group">
+ <label>فروع الكرت (لو بيشتغل في أكثر من فرع)</label>
+ <div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:4px;">
+ ${BRANCHES.map(
+   b =>
+     `<label style="display:flex; align-items:center; gap:6px; font-weight:600;"><input type="checkbox" class="edit-emp-branch-chk" value="${esc(b)}" ${staffBranches(e).includes(b) ? 'checked' : ''}> ${esc(b)}</label>`,
+ ).join('')}
+ </div>
+ </div>
  <div class="form-group"><label>الحالة</label>
  <select id="edit-emp-status">
  <option value="نشط" ${e.status !== 'موقوف' ? 'selected' : ''}>نشط</option>
@@ -2911,6 +2907,9 @@ function saveEmployeeEdit(id) {
   e.role = role;
   e.salary = num(val('edit-emp-salary'));
   e.branch = val('edit-emp-branch');
+  // Branches shown on the staff card (a coach may work at several). Empty means
+  // the card falls back to the single primary branch above.
+  e.branches = [...document.querySelectorAll('.edit-emp-branch-chk:checked')].map(c => c.value);
   e.status = val('edit-emp-status');
   dbSetDoc(employeesCol, e.id, e);
   closeModal();
@@ -4689,10 +4688,10 @@ function recordStaffByCode() {
   document.getElementById('staff-code').value = '';
 }
 
-// Prints a STAFF card in the same style as the players' cards but DARKER (deep
-// navy + deep-gold accent), so staff cards read as a darker variant of the
-// brand card. The staff code is a QR — scanning it into the "staff-code" box
-// clocks the employee in (first scan) / out (second scan).
+// Prints a STAFF card in the SAME design as the players' cards, at the current
+// print size — only the front rows differ (Role + branch[es]), the back is the
+// same barcode. Scanning the code into the "staff-code" box clocks the employee
+// in (first scan) / out (second scan).
 function printStaffCard(empId) {
   const e = (data.employees || []).find(x => x.id === empId);
   if (!e) return;
@@ -4702,84 +4701,9 @@ function printStaffCard(empId) {
     showNotification('لا يوجد كود لهذا الموظف (يحتاج صلاحية مدير)', 'warning');
     return;
   }
-  const color = '#C9A227'; // deep gold accent (darker than the players' gold)
   const logoUrl = new URL('src/logo-after.png', location.href).href;
-  const qrUrl = new URL('vendor/qrcode.min.js', location.href).href;
-  const win = window.open('', '_blank');
-  if (!win) {
-    showNotification('فعّل السماح بالنوافذ المنبثقة لطباعة الكرت', 'warning');
-    return;
-  }
-  win.document.write(`
- <html dir="rtl" lang="ar"><head><title>بطاقة موظف - ${esc(e.name)}</title>
- <meta charset="UTF-8">
- <script src="${qrUrl}"><\/script>
- <style>
- @page { size: 90mm 56mm; margin: 0; }
- * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
- html, body { margin: 0; padding: 0; background: #ffffff; }
- /* Staff card = the players' brand card, but a DARKER navy + deep-gold accent. */
- .scard {
- position: relative; width: 90mm; height: 56mm; overflow: hidden;
- background:
- radial-gradient(60mm 40mm at 88% 8%, ${color}26, transparent 60%),
- linear-gradient(135deg, #0E141C 0%, #161D2B 60%, #090C12 100%);
- border-radius: 8px; padding: 4.5mm 5mm;
- display: flex; flex-direction: column; justify-content: space-between; color: #E9EDF3;
- }
- .scard::before { content: ''; position: absolute; inset: 1.1mm; border: 0.5mm solid ${color}; border-radius: 6px; pointer-events: none; }
- .scard::after { content: ''; position: absolute; top: 0; right: 0; left: 0; height: 1.6mm; background: ${color}; }
- .s-top { display: flex; justify-content: space-between; align-items: center; z-index: 1; }
- .club-name { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 1px; }
- .club-name span { color: ${color}; }
- .club-sub { font-size: 8px; letter-spacing: 2px; color: ${color}; margin-top: 1.5mm; font-weight: 700; }
- .s-logo { height: 12mm; width: auto; }
- .s-divider { height: 0.3mm; background: linear-gradient(90deg, transparent, ${color}, transparent); margin: 1mm 0; z-index: 1; }
- .s-body { display: flex; justify-content: space-between; align-items: center; gap: 4mm; z-index: 1; }
- .s-info { flex: 1; min-width: 0; }
- .lbl { font-size: 6.5px; letter-spacing: 1px; color: rgba(233,237,243,0.5); text-transform: uppercase; }
- .s-name { font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 1mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
- .s-role { font-size: 9px; color: ${color}; font-weight: 600; margin-bottom: 1.5mm; }
- .s-code { font-size: 13px; font-family: 'Courier New', monospace; letter-spacing: 1px; color: #E9EDF3; font-weight: 700; }
- .s-qr { background: #fff; padding: 1.2mm; border-radius: 1.5mm; line-height: 0; box-shadow: 0 0 0 0.4mm ${color}; }
- .s-footer { font-size: 6.5px; color: ${color}; text-align: center; letter-spacing: 0.5px; z-index: 1; }
- </style>
- </head>
- <body>
- <div class="scard">
- <div class="s-top">
- <div class="scard-brand">
- <div class="club-name">El Wasl <span>Academy</span></div>
- <div class="club-sub">بطاقة موظف</div>
- </div>
- <img class="s-logo" src="${logoUrl}" alt="" onerror="this.style.display='none'">
- </div>
- <div class="s-divider"></div>
- <div class="s-body">
- <div class="s-info">
- <div class="lbl">الاسم</div>
- <div class="s-name">${esc(e.name)}</div>
- <div class="s-role">${esc(e.role || '-')} • ${esc(e.branch || 'غير محدد')}</div>
- <div class="lbl">الكود</div>
- <div class="s-code">${esc(code)}</div>
- </div>
- <div class="s-qr"><div id="qrcode"></div></div>
- </div>
- <div class="s-footer">امسح الكود لتسجيل الحضور والانصراف</div>
- </div>
- <script>
- window.onload = function() {
- function render() {
- if (window.QRCode) { new QRCode(document.getElementById("qrcode"), { text: "${esc(code)}", width: 92, height: 92, colorDark: "#0E141C", colorLight: "#ffffff" }); }
- setTimeout(function() { window.print(); }, 350);
- }
- if (window.QRCode) { render(); }
- else { var s = document.createElement('script'); s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload = render; s.onerror = render; document.head.appendChild(s); }
- };
- <\/script>
- </body></html>
- `);
-  win.document.close();
+  const slots = `<div class="slot">${staffCardFrontHTML(e, code, logoUrl, '')}</div><div class="slot">${cardBackHTML(code, logoUrl, '')}</div>`;
+  openCardSheet(`بطاقة موظف - ${e.name}`, slots);
 }
 
 // Daily PDF: one page per branch, listing each staff member's check-in/out.
@@ -6158,11 +6082,8 @@ function reportItem(label, value, color = 'var(--accent)') {
 }
 
 function reportDoc(title, bodyHtml) {
-  const win = window.open('', '_blank');
-  if (!win) {
-    showNotification('فعّل السماح بالنوافذ المنبثقة لطباعة التقرير', 'warning');
-    return;
-  }
+  const win = openPrintWindow('فعّل السماح بالنوافذ المنبثقة لطباعة التقرير');
+  if (!win) return;
   win.document.write(`
  <html dir="rtl" lang="ar"><head><title>${title}</title>
  <meta charset="UTF-8">
