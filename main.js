@@ -1983,15 +1983,17 @@ function openPrintWindow(blockedMsg) {
 }
 
 // ==================== CARD PRINT SIZE ====================
-// The one portrait card design can print at several physical sizes. Each size
-// is a portrait box (width × height in mm); the 30×60 card is scaled to FIT it
-// (uniform, no distortion) so it just prints bigger/smaller. The chosen size is
-// global + persisted, so it applies to EVERY card print — players, blank
-// pre-coded cards, and the single-card window.
+// The one card design can print at several physical sizes AND orientations.
+// Each size is a box (width × height in mm): w < h means the card prints upright
+// (طولي); w > h means it prints landscape (عرضي) — the card is rotated 90° to
+// fill the box, no distortion. The chosen size/orientation is global + persisted,
+// so it applies to EVERY card print — players, staff, blank cards, single card.
 const CARD_PRINT_SIZES = {
-  keychain: { label: 'ميدالية 3×6 سم', w: 30, h: 60 },
-  '85x55': { label: '8.5 × 5.5 سم', w: 55, h: 85 },
-  '60x40': { label: '6 × 4 سم', w: 40, h: 60 },
+  keychain: { label: 'ميدالية 3×6 سم (طولي)', w: 30, h: 60 },
+  '85x55': { label: '8.5 × 5.5 سم (طولي)', w: 55, h: 85 },
+  '85x55l': { label: '8.5 × 5.5 سم (عرضي)', w: 85, h: 55 },
+  '60x40': { label: '6 × 4 سم (طولي)', w: 40, h: 60 },
+  '60x40l': { label: '6 × 4 سم (عرضي)', w: 60, h: 40 },
 };
 let cardPrintSizeKey = CARD_PRINT_SIZES[localStorage.getItem('card-print-size')]
   ? localStorage.getItem('card-print-size')
@@ -2029,22 +2031,26 @@ function initCardSizeSelects() {
 // (local JsBarcode vendor lib). The single portrait-card print path.
 function openCardSheet(title, slotsHtml) {
   const size = currentCardSize();
-  const scale = Math.min(size.w / 30, size.h / 60); // fit the 30×60 card, no distortion
+  // Landscape when the box is wider than tall: rotate the 30×60 card 90° so its
+  // footprint is 60×30, then fit that into the box. Otherwise fit upright.
+  const landscape = size.w > size.h;
+  const scale = landscape ? Math.min(size.w / 60, size.h / 30) : Math.min(size.w / 30, size.h / 60);
   const sizeNote = cardPrintSizeKey === 'keychain' ? '' : ` — ${size.label}`;
-  // Lay the cards in a centred grid at their TRUE (undistorted) size, each the
-  // exact scaled card, with a small gap between them and a thin outline marking
-  // each card's edge. Cutting happens IN the gap (never on the card), so a
-  // slightly-off cut lands in the whitespace instead of clipping a card. The
-  // outline also makes the white barcode backs visible on white paper.
-  const cardW = 30 * scale;
-  const cardH = 60 * scale;
+  // Lay the cards in a centred grid at their TRUE (undistorted) footprint, each
+  // slot hugging the card, with a small gap between them and a thin outline
+  // marking each card's edge. Cutting happens IN the gap (never on the card), so
+  // a slightly-off cut lands in the whitespace. The outline also makes the white
+  // barcode backs visible on white paper.
+  const cardW = (landscape ? 60 : 30) * scale;
+  const cardH = (landscape ? 30 : 60) * scale;
+  const cardTransform = landscape ? `rotate(90deg) scale(${scale})` : `scale(${scale})`;
   const sheetCss = `
  @page { size: A4; margin: 8mm; }
  * { box-sizing: border-box; margin:0; padding:0; font-family:'Segoe UI',Arial,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
  html, body { background:#fff; }
  .sheet { display:flex; flex-wrap:wrap; justify-content:center; align-content:flex-start; gap:2.5mm; }
  .slot { width:${cardW}mm; height:${cardH}mm; display:flex; align-items:center; justify-content:center; break-inside:avoid; overflow:hidden; outline:0.15mm solid #c4c4c4; }
- .slot .card { transform: scale(${scale}); border-radius:0; }
+ .slot .card { transform: ${cardTransform}; border-radius:0; }
  `;
   const bcUrl = new URL('vendor/jsbarcode.min.js', location.href).href;
   const win = openPrintWindow();
