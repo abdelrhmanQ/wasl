@@ -2344,7 +2344,7 @@ function renderAttendanceCard(t, info, opts) {
     if (opts.returnedAfter)
       alert += `<div class="att-alert att-alert-info">👋 عاد بعد انقطاع ${opts.returnedAfter} يوم — أهلاً بعودته!</div>`;
     if (info.expired)
-      alert += `<div class="att-alert att-alert-warning">⚠️ تم استهلاك آخر حصة في الاشتراك. برجاء التجديد قبل الحضور القادم.</div>`;
+      alert += `<div class="att-alert att-alert-danger">⛔ تسجيل دخول دون تجديد — الاشتراك منتهي.<br>برجاء تجديد الاشتراك.</div>`;
     else if (info.near)
       alert += `<div class="att-alert att-alert-warning">⚠️ الاشتراك قارب على الانتهاء (${esc(info.remLabel)}). برجاء تجديد الاشتراك.</div>`;
   }
