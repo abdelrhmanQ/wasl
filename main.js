@@ -2163,12 +2163,9 @@ async function recordAttendance() {
     return;
   }
 
-  // Expired subscription -> entry forbidden, nothing is recorded.
-  if (trainee.type === 'subscription' && info.expired) {
-    renderAttendanceCard(trainee, info, { state: 'blocked', summary });
-    document.getElementById('attendance-code').value = '';
-    return;
-  }
+  // Expired subscription: entry is ALLOWED (by request) — attendance is still
+  // recorded and shows in the log; the card just flags the sub as expired so the
+  // desk can prompt a renewal. (Frozen stays blocked — it's a deliberate pause.)
 
   // Already checked in for THIS sport today -> don't record again (a multi-sport
   // player can still check in for a different sport on the same day).
@@ -2214,7 +2211,8 @@ async function recordAttendance() {
   // Consume one session for session-based subscriptions. Runs only when this
   // device's insert won the race, so two devices can't both decrement.
   if (trainee.type === 'subscription' && info.kind === 'sessions') {
-    trainee.sessionsRemaining = num(trainee.sessionsRemaining) - 1;
+    // Don't go negative: an expired (0-session) player may now check in.
+    trainee.sessionsRemaining = Math.max(0, num(trainee.sessionsRemaining) - 1);
     if (trainee.sessionsRemaining <= 0) trainee.status = 'منتهي';
     dbSetDoc(traineesCol, trainee.id, trainee);
   }
