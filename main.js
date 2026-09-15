@@ -912,6 +912,15 @@ function filterTrainees() {
     return matchSport && matchTrainer && matchText;
   });
 
+  // Sort by subscription state: active first (most days/sessions remaining),
+  // then near-expiry, then expired last. Frozen subs stay above expired.
+  const subSortKey = t => {
+    const info = subInfo(t);
+    const rem = num(info.remaining); // null -> 0
+    return info.expired ? rem - 1e9 : rem;
+  };
+  list.sort((a, b) => subSortKey(b) - subSortKey(a));
+
   const tbody = document.getElementById('trainees-table');
   if (data.trainees.length === 0) {
     tbody.innerHTML =
