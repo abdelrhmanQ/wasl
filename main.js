@@ -2364,27 +2364,51 @@ function renderAttendanceCard(t, info, opts) {
   resultDiv.innerHTML = details + alert + renewBtn;
 }
 
-function updateAttendanceLog() {
-  const today = todayAr();
-  const todayAttendance = data.attendance.filter(a => a.date === today);
+// Days already pulled from the DB for the log's date picker (avoids re-fetching
+// the same past day every time it's re-selected).
+let attLogLoadedDays = new Set();
 
-  document.getElementById('today-present').textContent = todayAttendance.length;
+// Reset the attendance-log date picker back to today.
+function clearAttLogDate() {
+  const el = document.getElementById('att-log-date');
+  if (el) el.value = todayISO();
+  updateAttendanceLog();
+}
+
+function updateAttendanceLog() {
+  // Which day to show: the date picker's value, defaulting to today.
+  const picker = document.getElementById('att-log-date');
+  if (picker && !picker.value) picker.value = todayISO();
+  const pickedISO = picker && picker.value ? picker.value : todayISO();
+  const isToday = pickedISO === todayISO();
+
+  // A past day may be outside the default 14-day window — pull just that day
+  // from the DB once, then re-render.
+  if (!isToday && !historyFullyLoaded && !attLogLoadedDays.has(pickedISO)) {
+    attLogLoadedDays.add(pickedISO);
+    const from = new Date(pickedISO + 'T00:00:00').getTime();
+    loadHistoryRange(from, from + 86400000 - 1).then(updateAttendanceLog);
+  }
+
+  const dayAttendance = data.attendance.filter(a => dateKey(a.date) === pickedISO);
+
+  document.getElementById('today-present').textContent = dayAttendance.length;
 
   const totalActive = data.trainees.filter(t => t.status === 'نشط').length;
-  const absent = Math.max(0, totalActive - todayAttendance.length);
+  const absent = Math.max(0, totalActive - dayAttendance.length);
   document.getElementById('today-absent').textContent = absent;
 
-  const rate = totalActive > 0 ? Math.round((todayAttendance.length / totalActive) * 100) : 0;
+  const rate = totalActive > 0 ? Math.round((dayAttendance.length / totalActive) * 100) : 0;
   document.getElementById('attendance-rate').textContent = `${rate}%`;
 
   const tbody = document.getElementById('attendance-log');
-  if (todayAttendance.length === 0) {
+  if (dayAttendance.length === 0) {
     tbody.innerHTML =
-      '<tr><td colspan="5" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد سجلات حضور لليوم</td></tr>';
+      '<tr><td colspan="5" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد سجلات حضور لهذا اليوم</td></tr>';
     return;
   }
 
-  tbody.innerHTML = todayAttendance
+  tbody.innerHTML = dayAttendance
     .map(
       (a, i) => `
  <tr>

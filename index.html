@@ -985,17 +985,22 @@
           <!-- Attendance Log -->
           <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px">
-              <div class="card-title" style="margin: 0">سجل الحضور - اليوم</div>
-              <button
-                class="btn btn-outline btn-sm"
-                onclick="loadAllHistory()"
-                title="افتراضياً يُعرض سجل آخر 14 يوم فقط لتوفير الاستهلاك. اضغط لتحميل كل الفترة."
-              >
-                📂 تحميل كل السجل (الفترة كاملة)
-              </button>
+              <div class="card-title" style="margin: 0">سجل الحضور</div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+                <label style="font-size: 12px; color: rgba(48, 56, 65, 0.6)">التاريخ:</label>
+                <input type="date" id="att-log-date" class="table-filter" style="width: auto" onchange="updateAttendanceLog()" />
+                <button class="btn btn-outline btn-sm" onclick="clearAttLogDate()">اليوم</button>
+                <button
+                  class="btn btn-outline btn-sm"
+                  onclick="loadAllHistory()"
+                  title="افتراضياً يُعرض سجل آخر 14 يوم فقط لتوفير الاستهلاك. اضغط لتحميل كل الفترة."
+                >
+                  📂 تحميل كل السجل
+                </button>
+              </div>
             </div>
             <p style="color: rgba(48, 56, 65, 0.4); font-size: 12px; margin: 6px 0 14px">
-              يُعرض سجل آخر 14 يوم افتراضياً لتقليل استهلاك قاعدة البيانات.
+              اختر التاريخ لعرض حضور أي يوم. افتراضياً يُعرض سجل آخر 14 يوم؛ لأيام أقدم اضغط "تحميل كل السجل".
             </p>
             <input
               type="text"
