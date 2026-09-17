@@ -2455,6 +2455,18 @@ function renewSubscription() {
 
   const today = todayAr();
 
+  // Snapshot the subscription state BEFORE the renewal, stored on the payment,
+  // so "إلغاء التجديد" can restore it exactly if this was done by mistake.
+  const undo = {
+    expiryDate: trainee.expiryDate,
+    subTotal: trainee.subTotal,
+    subPaid: trainee.subPaid,
+    status: trainee.status,
+    durationDays: trainee.durationDays,
+    sessionsTotal: trainee.sessionsTotal,
+    sessionsRemaining: trainee.sessionsRemaining,
+  };
+
   addPayment({
     id: trainee.id,
     name: trainee.name,
@@ -2465,6 +2477,7 @@ function renewSubscription() {
     date: date || today,
     status: 'مكتمل',
     branch: branch,
+    undo,
   });
 
   if (trainee.subType === 'sessions') {
@@ -2517,6 +2530,7 @@ function updateFinancial() {
         currentRole === 'admin' && p._docId
           ? `
  <button class="btn btn-outline btn-sm" onclick="editPayment('${esc(p._docId)}')">تعديل</button>
+ ${p.type === 'تجديد' ? `<button class="btn btn-warning btn-sm" onclick="cancelRenewal('${esc(p._docId)}')">إلغاء التجديد</button>` : ''}
  <button class="btn btn-danger btn-sm" onclick="deletePayment('${esc(p._docId)}')">حذف</button>`
           : '—';
       return `
@@ -2970,6 +2984,36 @@ function deletePayment(docId) {
   renderExtraIncome();
   updateDashboard();
   showNotification('تم حذف عملية الدفع', 'danger');
+}
+
+// Undo a renewal done by mistake: remove the renewal payment AND restore the
+// player's subscription (expiry / dues / status) to the snapshot taken at renew
+// time. Admin only. Old renewals (before this feature) carry no snapshot, so we
+// can only delete the payment and warn that the expiry wasn't rolled back.
+function cancelRenewal(docId) {
+  if (currentRole !== 'admin') return;
+  const p = data.payments.find(x => x._docId === docId);
+  if (!p || p.type !== 'تجديد') return;
+  const t = data.trainees.find(x => x.id === p.id);
+  if (!confirm(`إلغاء تجديد "${p.name}" بمبلغ ${num(p.amount).toLocaleString()} ج.م؟\nهيتحذف التجديد ويرجع الاشتراك لحالته قبل التجديد.`))
+    return;
+
+  if (t && p.undo) {
+    // Restore the exact pre-renewal subscription state.
+    Object.assign(t, p.undo);
+    dbSetDoc(traineesCol, t.id, t);
+  }
+  data.payments = data.payments.filter(x => x._docId !== docId);
+  dbDeleteDoc(paymentsCol, docId);
+  updateFinancial();
+  updateTraineesTable();
+  updateDashboard();
+
+  if (t && p.undo) {
+    showNotification(`تم إلغاء التجديد وإرجاع اشتراك ${t.name} لحالته السابقة`);
+  } else {
+    showNotification('تم حذف التجديد (لم يُرجَّع تاريخ الانتهاء تلقائياً — عدّله يدوياً لو لزم)', 'warning');
+  }
 }
 
 function editPayment(docId) {
