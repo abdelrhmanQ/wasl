@@ -2404,7 +2404,7 @@ function updateAttendanceLog() {
   const tbody = document.getElementById('attendance-log');
   if (dayAttendance.length === 0) {
     tbody.innerHTML =
-      '<tr><td colspan="5" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد سجلات حضور لهذا اليوم</td></tr>';
+      '<tr><td colspan="6" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد سجلات حضور لهذا اليوم</td></tr>';
     return;
   }
 
@@ -2417,6 +2417,7 @@ function updateAttendanceLog() {
  <td>${esc(a.name)}</td>
  <td>${esc(a.time)}</td>
  <td><span class="badge badge-success">حاضر</span></td>
+ <td style="font-size:11px; color:rgba(48,56,65,0.55);">${esc((a.createdBy || '—').split('@')[0])}</td>
  </tr>
  `,
     )
@@ -2526,13 +2527,18 @@ function updateFinancial() {
 
   tbody.innerHTML = data.payments
     .map(p => {
-      const actions =
-        currentRole === 'admin' && p._docId
-          ? `
- <button class="btn btn-outline btn-sm" onclick="editPayment('${esc(p._docId)}')">تعديل</button>
- ${p.type === 'تجديد' ? `<button class="btn btn-warning btn-sm" onclick="cancelRenewal('${esc(p._docId)}')">إلغاء التجديد</button>` : ''}
- <button class="btn btn-danger btn-sm" onclick="deletePayment('${esc(p._docId)}')">حذف</button>`
-          : '—';
+      // Employees may cancel a renewal (undo a mistake); edit/delete stay admin-only.
+      let actions = '—';
+      if (p._docId) {
+        const parts = [];
+        if (currentRole === 'admin')
+          parts.push(`<button class="btn btn-outline btn-sm" onclick="editPayment('${esc(p._docId)}')">تعديل</button>`);
+        if (p.type === 'تجديد')
+          parts.push(`<button class="btn btn-warning btn-sm" onclick="cancelRenewal('${esc(p._docId)}')">إلغاء التجديد</button>`);
+        if (currentRole === 'admin')
+          parts.push(`<button class="btn btn-danger btn-sm" onclick="deletePayment('${esc(p._docId)}')">حذف</button>`);
+        if (parts.length) actions = parts.join('\n ');
+      }
       return `
  <tr>
  <td><code style="color: var(--gold); font-family: monospace;">${esc(p.id)}</code></td>
@@ -2669,10 +2675,11 @@ function renderExtraIncome() {
     .slice()
     .reverse()
     .map(p => {
-      const actions =
-        currentRole === 'admin' && p._docId
-          ? `<button class="btn btn-danger btn-sm" onclick="deletePayment('${esc(p._docId)}')">حذف</button>`
-          : '—';
+      // Extra-income entries may be deleted by employees too (safe: only removes
+      // source:'extra' rows, never a subscription/renewal payment).
+      const actions = p._docId
+        ? `<button class="btn btn-danger btn-sm" onclick="deleteExtraIncome('${esc(p._docId)}')">حذف</button>`
+        : '—';
       // Linked entries show the player's name + code; manual/empty ones show "عام".
       const playerCell =
         p.id && p.id !== '—'
@@ -2986,12 +2993,28 @@ function deletePayment(docId) {
   showNotification('تم حذف عملية الدفع', 'danger');
 }
 
+// Delete an extra-income entry (tournament/exam/sales/…). Allowed for employees,
+// but guarded to ONLY remove source:'extra' rows — it can never delete a normal
+// subscription or renewal payment even if given its id.
+function deleteExtraIncome(docId) {
+  const p = data.payments.find(x => x._docId === docId);
+  if (!p || p.source !== 'extra') return;
+  if (!confirm(`حذف إيراد "${p.type}"${p.name && p.name !== p.type ? ' لـ ' + p.name : ''} بمبلغ ${num(p.amount).toLocaleString()} ج.م؟`))
+    return;
+  data.payments = data.payments.filter(x => x._docId !== docId);
+  dbDeleteDoc(paymentsCol, docId);
+  renderExtraIncome();
+  updateFinancial();
+  updateDashboard();
+  showNotification('تم حذف الإيراد الإضافي', 'danger');
+}
+
 // Undo a renewal done by mistake: remove the renewal payment AND restore the
 // player's subscription (expiry / dues / status) to the snapshot taken at renew
 // time. Admin only. Old renewals (before this feature) carry no snapshot, so we
 // can only delete the payment and warn that the expiry wasn't rolled back.
 function cancelRenewal(docId) {
-  if (currentRole !== 'admin') return;
+  // Allowed for employees too (renewals are often fixed at the desk).
   const p = data.payments.find(x => x._docId === docId);
   if (!p || p.type !== 'تجديد') return;
   const t = data.trainees.find(x => x.id === p.id);

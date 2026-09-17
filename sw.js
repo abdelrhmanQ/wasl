@@ -10,7 +10,7 @@
 // Supabase API calls are cross-origin, so they bypass this worker and
 // fail naturally offline — which is what triggers the outbox queueing.
 // ====================================================================
-const CACHE = 'wasl-app-v8';
+const CACHE = 'wasl-app-v9';
 const CORE = [
   './',
   'index.html',
