@@ -2527,7 +2527,7 @@ function updateFinancial() {
 
   tbody.innerHTML = data.payments
     .map(p => {
-      // Employees may cancel a renewal (undo a mistake); edit/delete stay admin-only.
+      // Employees may cancel a renewal and delete any payment; edit stays admin-only.
       let actions = '—';
       if (p._docId) {
         const parts = [];
@@ -2535,9 +2535,8 @@ function updateFinancial() {
           parts.push(`<button class="btn btn-outline btn-sm" onclick="editPayment('${esc(p._docId)}')">تعديل</button>`);
         if (p.type === 'تجديد')
           parts.push(`<button class="btn btn-warning btn-sm" onclick="cancelRenewal('${esc(p._docId)}')">إلغاء التجديد</button>`);
-        if (currentRole === 'admin')
-          parts.push(`<button class="btn btn-danger btn-sm" onclick="deletePayment('${esc(p._docId)}')">حذف</button>`);
-        if (parts.length) actions = parts.join('\n ');
+        parts.push(`<button class="btn btn-danger btn-sm" onclick="deletePayment('${esc(p._docId)}')">حذف</button>`);
+        actions = parts.join('\n ');
       }
       return `
  <tr>
@@ -2981,7 +2980,7 @@ function saveEmployeeEdit(id) {
 // the UI here and enforced server-side by Supabase row-level security.
 
 function deletePayment(docId) {
-  if (currentRole !== 'admin') return;
+  // Allowed for employees too (by request) — DB RLS must permit it as well.
   const p = data.payments.find(x => x._docId === docId);
   if (!p) return;
   if (!confirm(`حذف عملية الدفع لـ "${p.name}" بمبلغ ${num(p.amount).toLocaleString()} ج.م؟`)) return;
