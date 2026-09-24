@@ -666,6 +666,13 @@
                     </label>
                     <input type="number" id="addon-internet-price" value="100" />
                   </div>
+                  <div class="addon-box">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px">
+                      <input type="checkbox" id="addon-other" style="width: 18px; height: 18px" /> أخرى
+                    </label>
+                    <input type="text" id="addon-other-name" placeholder="اسم الخدمة (مثال: جلفز)" />
+                    <input type="number" id="addon-other-price" placeholder="السعر" style="margin-top: 8px" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -1520,7 +1527,6 @@
                   <option value="مبيعات">مبيعات (أدوات)</option>
                   <option value="اختبار">اختبار</option>
                   <option value="قيد/كارنيه">قيد سنوي / كارنيه</option>
-                  <option value="أخرى">أخرى</option>
                 </select>
               </div>
               <!-- Sales item: shown only for the "مبيعات" type. A datalist gives ready
@@ -1586,12 +1592,30 @@
               <span>سجل الإيرادات الإضافية</span>
               <span class="badge badge-success" id="extra-total">0 ج.م</span>
             </div>
+            <div class="search-bar" style="flex-wrap: wrap; margin-bottom: 16px">
+              <input
+                type="text"
+                id="extra-search-player"
+                placeholder="ابحث باسم اللاعب أو الكود..."
+                oninput="renderExtraIncome()"
+                style="flex: 1; min-width: 220px"
+              />
+              <input
+                type="month"
+                id="extra-search-month"
+                onchange="renderExtraIncome()"
+                title="البحث بالشهر"
+                style="min-width: 170px"
+              />
+              <button class="btn btn-outline" onclick="resetExtraIncomeFilters()">إلغاء البحث</button>
+            </div>
             <div style="overflow-x: auto">
               <table>
                 <thead>
                   <tr>
                     <th>النوع</th>
                     <th>اللاعب</th>
+                    <th>الحالة</th>
                     <th>البيان</th>
                     <th>الفرع</th>
                     <th>المبلغ</th>

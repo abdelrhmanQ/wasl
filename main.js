@@ -445,6 +445,7 @@ async function registerTrainee() {
   const notes = val('reg-notes');
   // How the player found us (social media / referral / walk-in).
   const source = val('reg-source');
+  const registrationAddons = readAddonInputs('addon');
 
   if (!name || !phone) {
     showNotification('يرجى ملء الاسم ورقم الهاتف على الأقل', 'warning');
@@ -452,6 +453,10 @@ async function registerTrainee() {
   }
   if (!branch) {
     showNotification('يرجى اختيار الفرع', 'warning');
+    return;
+  }
+  if (registrationAddons.other > 0 && !registrationAddons.otherName) {
+    showNotification('اكتب اسم الخدمة في خانة أخرى', 'warning');
     return;
   }
 
@@ -545,7 +550,7 @@ async function registerTrainee() {
 
   // Optional add-on services are stored on the trainee and billed.
   trainee.addons = emptyAddons();
-  billAddons(trainee, readAddonInputs('addon'), branch, today);
+  billAddons(trainee, registrationAddons, branch, today);
   dbSetDoc(traineesCol, trainee.id, trainee);
 
   updateDashboard();
@@ -573,6 +578,7 @@ const ADDON_DEFS = [
   { key: 'tournament', type: 'بطولة', plan: 'بطولات', label: 'بطولات', def: '' },
   { key: 'locker', type: 'لوكر', plan: 'إيجار لوكر', label: 'إيجار لوكر', def: '150' },
   { key: 'internet', type: 'انترنت', plan: 'اشتراك انترنت', label: 'اشتراك انترنت', def: '100' },
+  { key: 'other', type: 'أخرى', plan: 'أخرى', label: 'أخرى', def: '' },
 ];
 
 // A fresh add-ons object (every service at 0), derived from ADDON_DEFS so new
@@ -594,6 +600,8 @@ function readAddonInputs(prefix) {
     const price = document.getElementById(`${prefix}-${d.key}-price`);
     result[d.key] = check && check.checked ? num(price ? price.value : 0) : 0;
   });
+  const otherName = document.getElementById(`${prefix}-other-name`);
+  result.otherName = otherName ? otherName.value.trim() : '';
   return result;
 }
 
@@ -607,11 +615,12 @@ function billAddons(trainee, newAddons, branch, today) {
     const newP = num(newAddons[d.key]);
     const delta = newP - oldP;
     if (delta > 0) {
+      const customName = d.key === 'other' ? (newAddons.otherName || trainee.addonOtherName || 'أخرى') : '';
       addPayment({
         id: trainee.id,
         name: trainee.name,
-        type: d.type,
-        plan: d.plan,
+        type: d.key === 'other' ? customName : d.type,
+        plan: d.key === 'other' ? customName : d.plan,
         amount: delta,
         method: 'نقداً',
         date: today,
@@ -621,14 +630,17 @@ function billAddons(trainee, newAddons, branch, today) {
     }
     trainee.addons[d.key] = newP;
   });
+  if (newAddons.otherName !== undefined) trainee.addonOtherName = newAddons.otherName;
 }
 
 function resetAddons() {
   ADDON_DEFS.forEach(d => {
     const check = document.getElementById(`addon-${d.key}`);
     const price = document.getElementById(`addon-${d.key}-price`);
+    const name = document.getElementById(`addon-${d.key}-name`);
     if (check) check.checked = false;
     if (price) price.value = d.def;
+    if (name) name.value = '';
   });
 }
 
@@ -1013,7 +1025,12 @@ function viewTrainee(index) {
    return `<div style="margin-top: 15px; padding: 15px; background: rgba(48,56,65,0.05); border-radius: 10px;">
  <div style="color: rgba(48,56,65,0.4); font-size: 12px; margin-bottom: 8px;">خدمات إضافية</div>
  <div style="display:flex; flex-wrap:wrap; gap:8px;">
- ${active.map(d => `<span class="badge badge-info">${esc(d.label)}: ${num(t.addons[d.key]).toLocaleString()} ج.م</span>`).join('')}
+ ${active
+   .map(d => {
+     const label = d.key === 'other' ? t.addonOtherName || d.label : d.label;
+     return `<span class="badge badge-info">${esc(label)}: ${num(t.addons[d.key]).toLocaleString()} ج.م</span>`;
+   })
+   .join('')}
  </div>
  </div>`;
  })()}
@@ -1129,13 +1146,15 @@ function editTrainee(index) {
  ${ADDON_DEFS.map(d => {
    const cur = num((t.addons || {})[d.key]);
    const checked = cur > 0 ? 'checked' : '';
-   const val = cur > 0 ? cur : d.def;
+   const priceVal = cur > 0 ? cur : d.def;
+   const otherName = d.key === 'other' ? t.addonOtherName || '' : '';
    return `
  <div class="addon-box">
  <label style="display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:8px;">
  <input type="checkbox" id="edit-addon-${d.key}" ${checked} style="width:18px; height:18px;"> ${esc(d.label)}
  </label>
- <input type="number" id="edit-addon-${d.key}-price" value="${esc(val)}">
+ ${d.key === 'other' ? `<input type="text" id="edit-addon-other-name" value="${esc(otherName)}" placeholder="اسم الخدمة (مثال: جلفز)">` : ''}
+ <input type="number" id="edit-addon-${d.key}-price" value="${esc(priceVal)}" ${d.key === 'other' ? 'style="margin-top: 8px"' : ''}>
  </div>`;
  }).join('')}
  </div>
@@ -1207,8 +1226,13 @@ function saveTraineeEdit(index) {
   t.codes = codes;
 
   // Apply add-on changes (any added/increased service is billed as income).
+  const editedAddons = readAddonInputs('edit-addon');
+  if (editedAddons.other > 0 && !editedAddons.otherName) {
+    showNotification('اكتب اسم الخدمة في خانة أخرى', 'warning');
+    return;
+  }
   const today = todayAr();
-  billAddons(t, readAddonInputs('edit-addon'), t.branch, today);
+  billAddons(t, editedAddons, t.branch, today);
 
   dbSetDoc(traineesCol, t.id, t);
   updateTraineesTable();
@@ -2565,7 +2589,7 @@ function updateFinancial() {
 // into the financial totals, dashboard and reports) tagged `source: 'extra'`
 // so this section can list only its own entries. Linked entries carry the
 // player's real id; manual ones use the id '—' (like private-session income).
-const EXTRA_INCOME_TYPES = ['بطولة', 'اختبار', 'كشف طبي', 'مبيعات', 'قيد/كارنيه', 'أخرى'];
+const EXTRA_INCOME_TYPES = ['بطولة', 'اختبار', 'كشف طبي', 'مبيعات', 'قيد/كارنيه'];
 
 // Show the sales-item picker only for the "مبيعات" type (item = نت/استك/جلفز...).
 function onExtraTypeChange() {
@@ -2659,14 +2683,20 @@ function addExtraIncome() {
 function renderExtraIncome() {
   const tbody = document.getElementById('extra-income-table');
   if (!tbody) return; // section not in the DOM (e.g. before it renders)
-  const rows = data.payments.filter(p => p.source === 'extra');
+  const allRows = data.payments.filter(p => p.source === 'extra');
+  const search = val('extra-search-player').trim().toLowerCase();
+  const month = val('extra-search-month');
+  const rows = allRows.filter(p => {
+    const playerText = `${p.name || ''} ${p.id || ''}`.toLowerCase();
+    return (!search || playerText.includes(search)) && (!month || paymentMonth(p.date) === month);
+  });
   const total = rows.reduce((s, p) => s + num(p.amount), 0);
   const totalEl = document.getElementById('extra-total');
   if (totalEl) totalEl.textContent = `${total.toLocaleString()} ج.م`;
 
   if (rows.length === 0) {
     tbody.innerHTML =
-      '<tr><td colspan="9" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد إيرادات مسجلة</td></tr>';
+      '<tr><td colspan="10" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد إيرادات مسجلة</td></tr>';
     return;
   }
 
@@ -2686,10 +2716,12 @@ function renderExtraIncome() {
           : p.name && p.name !== p.type
             ? esc(p.name)
             : '<span style="color: rgba(48,56,65,0.4);">عام</span>';
+      const linked = p.id && p.id !== '—';
       return `
  <tr>
  <td><span class="badge badge-success">${esc(p.type)}</span></td>
  <td style="font-size: 12px;">${playerCell}</td>
+ <td><span class="badge ${linked ? 'badge-success' : 'badge-warning'}">${linked ? 'مشترك' : 'غير مشترك'}</span></td>
  <td style="font-size: 12px;">${esc(p.plan || '—')}</td>
  <td>${branchBadge(p.branch)}</td>
  <td style="color: var(--success); font-weight: 700;">${num(p.amount).toLocaleString()} ج.م</td>
@@ -2700,6 +2732,23 @@ function renderExtraIncome() {
  </tr>`;
     })
     .join('');
+}
+
+function paymentMonth(value) {
+  const raw = String(value || '')
+    .trim()
+    .replace(/[\u200e\u200f\u061c\s]/g, '')
+    .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+  const iso = raw.match(/^(\d{4})-(\d{1,2})/);
+  if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, '0')}`;
+  const ar = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  return ar ? `${ar[3]}-${String(ar[2]).padStart(2, '0')}` : '';
+}
+
+function resetExtraIncomeFilters() {
+  setVal('extra-search-player', '');
+  setVal('extra-search-month', '');
+  renderExtraIncome();
 }
 
 // ==================== SALARIES ====================
