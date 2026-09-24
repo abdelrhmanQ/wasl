@@ -961,6 +961,15 @@ function resetTraineeFilters() {
 function viewTrainee(index) {
   const t = data.trainees[index];
   const attendanceCount = data.attendance.filter(a => a.id === t.id).length;
+  const playerPayments = data.payments
+    .filter(p => p.id === t.id)
+    .slice()
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const playerPaymentsTotal = playerPayments.reduce((sum, p) => sum + num(p.amount), 0);
+  const extraPayments = playerPayments.filter(p => p.source === 'extra');
+  const servicePayments = playerPayments.filter(
+    p => p.source === 'player-service' || ADDON_DEFS.some(d => d.type === p.type || d.plan === p.plan),
+  );
 
   openModal(
     `${t.name}`,
@@ -1010,6 +1019,36 @@ function viewTrainee(index) {
  <div style="color: rgba(48,56,65,0.4); font-size: 12px;">مصدر التسجيل</div>
  <div style="font-weight: 600;">${esc(t.source || 'غير محدد')}</div>
  </div>
+ </div>
+ <div style="margin-top: 18px; padding: 15px; background: rgba(48,56,65,0.05); border-radius: 10px;">
+ <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+ <div style="font-weight:700; color:var(--accent);">كل مدفوعات اللاعب</div>
+ <span class="badge badge-success">الإجمالي: ${playerPaymentsTotal.toLocaleString()} ج.م</span>
+ </div>
+ <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+ <span class="badge badge-info">عدد العمليات: ${playerPayments.length}</span>
+ <span class="badge badge-info">إيرادات إضافية: ${extraPayments.reduce((sum, p) => sum + num(p.amount), 0).toLocaleString()} ج.م</span>
+ <span class="badge badge-info">خدمات إضافية: ${servicePayments.reduce((sum, p) => sum + num(p.amount), 0).toLocaleString()} ج.م</span>
+ </div>
+ ${
+   playerPayments.length
+     ? `<div style="overflow-x:auto;"><table style="width:100%; min-width:620px;">
+ <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>المبلغ</th><th>طريقة الدفع</th><th>التصنيف</th></tr></thead>
+ <tbody>${playerPayments
+   .map(
+     p => `<tr>
+ <td>${esc(p.date || '—')}</td>
+ <td>${esc(p.type || '—')}</td>
+ <td>${esc(p.plan || '—')}</td>
+ <td style="color:var(--success); font-weight:700;">${num(p.amount).toLocaleString()} ج.م</td>
+ <td>${esc(p.method || '—')}</td>
+ <td><span class="badge ${p.source === 'extra' ? 'badge-warning' : 'badge-info'}">${p.source === 'extra' ? 'إيراد إضافي' : 'اشتراك / خدمة'}</span></td>
+ </tr>`,
+   )
+   .join('')}</tbody>
+ </table></div>`
+     : '<div style="color:rgba(48,56,65,0.45);">لا توجد مدفوعات مسجلة لهذا اللاعب.</div>'
+ }
  </div>
  ${
    t.frozen
@@ -4506,6 +4545,7 @@ function createSession() {
       date: todayAr(),
       status: 'مكتمل',
       branch,
+      source: 'player-service',
     });
     updateFinancial();
     updateDashboard();
