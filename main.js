@@ -482,6 +482,7 @@ async function registerTrainee() {
 
   const paidNow = num(amount);
   const subTotal = num(total) > 0 ? num(total) : paidNow;
+  const subscriptionCycleId = genDocId('SUB');
 
   // This form only registers subscriptions (free trials register in their own
   // section), so every field here takes the subscription value.
@@ -507,6 +508,7 @@ async function registerTrainee() {
     amount: paidNow,
     subTotal,
     subPaid: paidNow,
+    subscriptionCycleId,
     notes,
     status: 'نشط',
     trialStatus: null,
@@ -541,6 +543,8 @@ async function registerTrainee() {
       type: 'اشتراك جديد',
       plan: sportLabel(trainee),
       amount: paidNow,
+      subscriptionCycleId,
+      subscriptionTotal: subTotal,
       method: method,
       date: today,
       status: remaining > 0 ? 'دفعة أولى' : 'مكتمل',
@@ -958,18 +962,214 @@ function resetTraineeFilters() {
   filterTrainees();
 }
 
-function viewTrainee(index) {
-  const t = data.trainees[index];
-  const attendanceCount = data.attendance.filter(a => a.id === t.id).length;
-  const playerPayments = data.payments
-    .filter(p => p.id === t.id)
-    .slice()
-    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-  const playerPaymentsTotal = playerPayments.reduce((sum, p) => sum + num(p.amount), 0);
-  const extraPayments = playerPayments.filter(p => p.source === 'extra');
-  const servicePayments = playerPayments.filter(
-    p => p.source === 'player-service' || ADDON_DEFS.some(d => d.type === p.type || d.plan === p.plan),
+async function playerPaymentHistory(t) {
+  const local = data.payments.filter(payment => payment.id === t.id);
+  if (!navigator.onLine || typeof dbPlayerPayments !== 'function') {
+    local.complete = false;
+    return local;
+  }
+  try {
+    const remote = await dbPlayerPayments(t.id);
+    const recordsById = new Map(remote.map(payment => [payment._docId || payment, payment]));
+    local.forEach(payment => recordsById.set(payment._docId || payment, payment));
+    const records = [...recordsById.values()];
+    records.complete = true;
+    return records;
+  } catch (err) {
+    console.error('Player payment history error:', err);
+    showNotification('تعذر تحميل سجل مدفوعات اللاعب بالكامل؛ يتم عرض البيانات المحلية المتاحة', 'warning');
+    local.complete = false;
+    return local;
+  }
+}
+
+function buildTraineePurchaseSummary(t, payments) {
+  const rows = [];
+  const subscriptionTypes = new Set(['اشتراك جديد', 'تجديد', 'قسط']);
+  const subscriptionPayments = payments.filter(payment => subscriptionTypes.has(payment.type));
+  const explicitCycles = new Map();
+  const legacySubscriptionPayments = [];
+  const sales = new Map();
+  const addonPayments = new Map();
+  const otherPayments = [];
+
+  subscriptionPayments.forEach(payment => {
+    if (!payment.subscriptionCycleId) {
+      legacySubscriptionPayments.push(payment);
+      return;
+    }
+    const cycle = explicitCycles.get(payment.subscriptionCycleId) || {
+      id: payment.subscriptionCycleId,
+      item: payment.plan || 'اشتراك',
+      total: 0,
+      paid: 0,
+    };
+    cycle.total = Math.max(cycle.total, num(payment.subscriptionTotal));
+    cycle.paid += num(payment.amount);
+    explicitCycles.set(payment.subscriptionCycleId, cycle);
+  });
+
+  payments.forEach(payment => {
+    if (subscriptionTypes.has(payment.type)) return;
+    if (payment.type === 'مبيعات' && payment.saleId) {
+      const sale = sales.get(payment.saleId) || {
+        id: payment.saleId,
+        item: payment.saleItem || payment.plan || 'مبيعات',
+        total: 0,
+        paid: 0,
+      };
+      sale.total = Math.max(sale.total, num(payment.saleTotal));
+      sale.paid += num(payment.amount);
+      sales.set(payment.saleId, sale);
+      return;
+    }
+    const addon = ADDON_DEFS.find(
+      def =>
+        payment.source !== 'extra' &&
+        (def.key === 'other'
+          ? payment.type === (t.addonOtherName || def.label) || payment.plan === (t.addonOtherName || def.label)
+          : payment.type === def.type || payment.plan === def.plan),
+    );
+    if (addon) {
+      const name = addon.key === 'other' ? t.addonOtherName || addon.label : addon.label;
+      const key = `${addon.key}\u0000${name}`;
+      const item = addonPayments.get(key) || { key, item: name, paid: 0 };
+      item.paid += num(payment.amount);
+      addonPayments.set(key, item);
+      return;
+    }
+    if (payment.type === 'مبيعات') {
+      rows.push({ item: payment.plan || 'مبيعات قديمة', category: 'مبيعات', total: null, paid: num(payment.amount) });
+      return;
+    }
+    if (payment.source === 'extra') {
+      rows.push({
+        item: [payment.type, payment.plan && payment.plan !== payment.type ? payment.plan : ''].filter(Boolean).join(' — '),
+        category: 'إيراد إضافي',
+        total: num(payment.amount),
+        paid: num(payment.amount),
+      });
+      return;
+    }
+    otherPayments.push(payment);
+  });
+
+  let currentCyclePaid = 0;
+  explicitCycles.forEach(cycle => {
+    if (cycle.id === t.subscriptionCycleId) {
+      cycle.total = Math.max(cycle.total, num(t.subTotal));
+      cycle.paid = Math.max(cycle.paid, num(t.subPaid));
+      currentCyclePaid = cycle.paid;
+    }
+    rows.push({
+      item: cycle.item,
+      category: cycle.id === t.subscriptionCycleId ? 'الاشتراك الحالي' : 'اشتراك / تجديد',
+      total: cycle.total > 0 ? cycle.total : null,
+      paid: cycle.paid,
+    });
+  });
+
+  if (t.type === 'subscription' && !explicitCycles.has(t.subscriptionCycleId)) {
+    currentCyclePaid = num(t.subPaid);
+    rows.push({
+      item: `اشتراك حالي — ${sportLabel(t)}`,
+      category: 'الاشتراك الحالي',
+      total: num(t.subTotal) > 0 ? num(t.subTotal) : null,
+      paid: currentCyclePaid,
+    });
+  }
+
+  const legacySubPaid = legacySubscriptionPayments.reduce((sum, payment) => sum + num(payment.amount), 0);
+  const previousSubPaid = Math.max(0, legacySubPaid - (t.subscriptionCycleId ? 0 : currentCyclePaid));
+  if (previousSubPaid > 0) {
+    rows.push({
+      item: 'اشتراكات / تجديدات سابقة (الإجمالي غير مسجل)',
+      category: 'اشتراك / تجديد',
+      total: null,
+      paid: previousSubPaid,
+    });
+  }
+
+  sales.forEach(sale => {
+    rows.push({ item: sale.item, category: 'مبيعات', total: sale.total > 0 ? sale.total : null, paid: sale.paid });
+  });
+  addonPayments.forEach(addon => {
+    rows.push({ item: addon.item, category: 'خدمات إضافية', total: addon.paid, paid: addon.paid });
+  });
+
+  ADDON_DEFS.forEach(addon => {
+    const item = addon.key === 'other' ? t.addonOtherName || addon.label : addon.label;
+    const key = `${addon.key}\u0000${item}`;
+    if (addonPayments.has(key)) return;
+    const total = num((t.addons || {})[addon.key]);
+    if (total > 0) rows.push({ item, category: 'خدمات إضافية', total, paid: null });
+  });
+
+  otherPayments.forEach(payment => {
+    rows.push({
+      item: [payment.type || 'مدفوعات أخرى', payment.plan && payment.plan !== payment.type ? payment.plan : '']
+        .filter(Boolean)
+        .join(' — '),
+      category: payment.source === 'player-service' ? 'خدمة إضافية' : 'مدفوعات أخرى',
+      total: null,
+      paid: num(payment.amount),
+    });
+  });
+
+  const totalPaid = payments.reduce((sum, payment) => sum + num(payment.amount), 0);
+  const knownTotal = rows.reduce((sum, row) => sum + (row.total == null ? 0 : row.total), 0);
+  const knownRemaining = rows.reduce(
+    (sum, row) => sum + (row.total == null || row.paid == null ? 0 : Math.max(0, row.total - row.paid)),
+    0,
   );
+  const unknownTotalCount = rows.filter(row => row.total == null).length;
+  const money = value => `${num(value).toLocaleString()} ج.م`;
+  const detailRows = rows.length
+    ? rows
+        .map(
+          row => `
+ <div class="player-purchase-row">
+ <div class="player-purchase-heading"><strong>${esc(row.item)}</strong><span class="badge badge-info">${esc(row.category)}</span></div>
+ <div class="player-purchase-values">
+ <span>الإجمالي: ${row.total == null ? 'غير مسجل' : money(row.total)}</span>
+ <span>المدفوع: ${row.paid == null ? 'غير متاح في السجل' : money(row.paid)}</span>
+ <span class="${row.total != null && row.paid != null && row.total > row.paid ? 'player-purchase-due' : ''}">المتبقي: ${row.total == null || row.paid == null ? 'غير محدد' : money(Math.max(0, row.total - row.paid))}</span>
+ </div>
+ </div>`,
+        )
+        .join('')
+    : '<div style="color:rgba(48,56,65,0.45);">لا توجد مشتريات أو خدمات مرتبطة مسجلة.</div>';
+
+  return {
+    totalPaid,
+    html: `<div class="player-purchases">
+ <div class="player-purchases-title">مشتريات ومدفوعات اللاعب</div>
+ <div class="player-purchases-totals">
+ <div><span>إجمالي المشتريات المعروفة</span><strong>${money(knownTotal)}</strong></div>
+ <div><span>إجمالي المدفوع المسجل</span><strong>${money(totalPaid)}</strong></div>
+ <div><span>المتبقي المعروف</span><strong>${money(knownRemaining)}</strong></div>
+ </div>
+ ${payments.complete ? '' : '<div class="player-purchases-note">تعذر تحميل سجل المدفوعات بالكامل؛ المبلغ المدفوع المعروض هو مجموع السجلات المتاحة فقط.</div>'}
+ ${unknownTotalCount ? `<div class="player-purchases-note">${unknownTotalCount} عملية قديمة لا تحتوي على إجمالي موثّق؛ لم يتم تخمين إجماليها أو المتبقي منها.</div>` : ''}
+ <div class="player-purchases-list">${detailRows}</div>
+ </div>`,
+  };
+}
+
+async function viewTrainee(index) {
+  let t = data.trainees[index];
+  if (!t) return;
+  const traineeId = t.id;
+  openModal(t.name, '<div style="padding:24px;text-align:center;color:rgba(48,56,65,0.55);">جارٍ تحميل سجل مدفوعات اللاعب...</div>');
+  const playerPayments = await playerPaymentHistory(t);
+  if (!document.getElementById('modal-overlay').classList.contains('show')) return;
+  index = data.trainees.findIndex(player => player.id === traineeId);
+  if (index < 0) return;
+  t = data.trainees[index];
+  const attendanceCount = data.attendance.filter(a => a.id === t.id).length;
+  const sortedPayments = playerPayments.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const purchaseSummary = buildTraineePurchaseSummary(t, playerPayments);
+  const playerPaymentsTotal = purchaseSummary.totalPaid;
 
   openModal(
     `${t.name}`,
@@ -1009,7 +1209,7 @@ function viewTrainee(index) {
  </div>
  <div style="padding: 15px; background: rgba(48,56,65,0.05); border-radius: 10px;">
  <div style="color: rgba(48,56,65,0.4); font-size: 12px;">المدفوع</div>
- <div style="font-weight: 600; color: var(--warning);">${num(t.amount).toLocaleString()} ج.م</div>
+ <div style="font-weight: 600; color: var(--warning);">${playerPaymentsTotal.toLocaleString()} ج.م</div>
  </div>
  <div style="padding: 15px; background: rgba(48,56,65,0.05); border-radius: 10px;">
  <div style="color: rgba(48,56,65,0.4); font-size: 12px;">تاريخ التسجيل</div>
@@ -1020,21 +1220,17 @@ function viewTrainee(index) {
  <div style="font-weight: 600;">${esc(t.source || 'غير محدد')}</div>
  </div>
  </div>
+ ${purchaseSummary.html}
  <div style="margin-top: 18px; padding: 15px; background: rgba(48,56,65,0.05); border-radius: 10px;">
  <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
- <div style="font-weight:700; color:var(--accent);">كل مدفوعات اللاعب</div>
- <span class="badge badge-success">الإجمالي: ${playerPaymentsTotal.toLocaleString()} ج.م</span>
- </div>
- <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
- <span class="badge badge-info">عدد العمليات: ${playerPayments.length}</span>
- <span class="badge badge-info">إيرادات إضافية: ${extraPayments.reduce((sum, p) => sum + num(p.amount), 0).toLocaleString()} ج.م</span>
- <span class="badge badge-info">خدمات إضافية: ${servicePayments.reduce((sum, p) => sum + num(p.amount), 0).toLocaleString()} ج.م</span>
+ <div style="font-weight:700; color:var(--accent);">سجل عمليات الدفع</div>
+ <span class="badge badge-success">عدد العمليات: ${playerPayments.length}</span>
  </div>
  ${
-   playerPayments.length
+   sortedPayments.length
      ? `<div style="overflow-x:auto;"><table style="width:100%; min-width:620px;">
  <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>المبلغ</th><th>طريقة الدفع</th><th>التصنيف</th></tr></thead>
- <tbody>${playerPayments
+ <tbody>${sortedPayments
    .map(
      p => `<tr>
  <td>${esc(p.date || '—')}</td>
@@ -1042,7 +1238,7 @@ function viewTrainee(index) {
  <td>${esc(p.plan || '—')}</td>
  <td style="color:var(--success); font-weight:700;">${num(p.amount).toLocaleString()} ج.م</td>
  <td>${esc(p.method || '—')}</td>
- <td><span class="badge ${p.source === 'extra' ? 'badge-warning' : 'badge-info'}">${p.source === 'extra' ? 'إيراد إضافي' : 'اشتراك / خدمة'}</span></td>
+ <td><span class="badge ${p.source === 'extra' ? 'badge-warning' : ['اشتراك جديد', 'تجديد', 'قسط'].includes(p.type) ? 'badge-success' : 'badge-info'}">${p.source === 'extra' ? 'إيراد إضافي' : ['اشتراك جديد', 'تجديد', 'قسط'].includes(p.type) ? 'اشتراك' : 'خدمة / دفعة'}</span></td>
  </tr>`,
    )
    .join('')}</tbody>
@@ -1523,6 +1719,7 @@ function confirmAcceptTrial(index) {
   t.amount = paid;
   t.subTotal = total;
   t.subPaid = paid;
+  t.subscriptionCycleId = genDocId('SUB');
   t.status = 'نشط';
   t.trialStatus = 'accepted';
   t.addons = t.addons || emptyAddons();
@@ -1535,6 +1732,8 @@ function confirmAcceptTrial(index) {
       type: 'اشتراك جديد',
       plan: sportLabel(t),
       amount: paid,
+      subscriptionCycleId: t.subscriptionCycleId,
+      subscriptionTotal: total,
       method,
       date: todayAr(),
       status: remaining > 0 ? 'دفعة أولى' : 'مكتمل',
@@ -1677,6 +1876,8 @@ function confirmInstallment(index) {
     type: 'قسط',
     plan: sportLabel(t),
     amount,
+    subscriptionCycleId: t.subscriptionCycleId || '',
+    subscriptionTotal: num(t.subTotal),
     method,
     date: today,
     status: remaining > 0 ? 'قسط' : 'مكتمل',
@@ -2529,14 +2730,19 @@ function renewSubscription() {
     durationDays: trainee.durationDays,
     sessionsTotal: trainee.sessionsTotal,
     sessionsRemaining: trainee.sessionsRemaining,
+    subscriptionCycleId: trainee.subscriptionCycleId || '',
   };
 
+  const subscriptionCycleId = genDocId('SUB');
+  const subscriptionTotal = num(amount);
   addPayment({
     id: trainee.id,
     name: trainee.name,
     type: 'تجديد',
     plan: trainee.sport || trainee.plan,
     amount: parseInt(amount),
+    subscriptionCycleId,
+    subscriptionTotal,
     method,
     date: date || today,
     status: 'مكتمل',
@@ -2559,6 +2765,7 @@ function renewSubscription() {
   // New period starts fully paid (renewal amount), clearing any old balance.
   trainee.subTotal = parseInt(amount);
   trainee.subPaid = parseInt(amount);
+  trainee.subscriptionCycleId = subscriptionCycleId;
   dbSetDoc(traineesCol, trainee.id, trainee);
   updateFinancial();
   updateTraineesTable();

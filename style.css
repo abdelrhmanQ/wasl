@@ -268,6 +268,92 @@ header .btn-outline:hover {
   overflow-y: auto;
 }
 
+.player-purchases {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid rgba(63, 143, 111, 0.2);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(63, 143, 111, 0.08), rgba(63, 143, 111, 0.025));
+}
+
+.player-purchases-title {
+  margin-bottom: 12px;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.player-purchases-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.player-purchases-totals > div {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.player-purchases-totals span {
+  color: rgba(48, 56, 65, 0.58);
+  font-size: 11px;
+}
+
+.player-purchases-totals strong {
+  color: var(--success);
+  font-size: 15px;
+}
+
+.player-purchases-note {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(192, 138, 46, 0.1);
+  color: #805a1e;
+  font-size: 11px;
+}
+
+.player-purchases-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.player-purchase-row {
+  padding: 10px;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.player-purchase-heading,
+.player-purchase-values {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.player-purchase-heading strong {
+  color: var(--accent);
+}
+
+.player-purchase-values {
+  justify-content: flex-start;
+  margin-top: 7px;
+  color: rgba(48, 56, 65, 0.7);
+  font-size: 11px;
+}
+
+.player-purchase-due {
+  color: var(--danger);
+  font-weight: 800;
+}
+
 /* ===== SECTIONS ===== */
 .section {
   display: none;

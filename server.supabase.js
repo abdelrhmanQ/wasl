@@ -866,6 +866,13 @@ async function dbAttendanceSummary(traineeId, days = 30) {
   };
 }
 
+// Player payment history is fetched by player id, independently of the
+// time-windowed payments section, so profiles can show lifetime balances.
+async function dbPlayerPayments(traineeId) {
+  const id = String(traineeId);
+  return (await fetchRows(paymentsCol, q => q.eq('data->>id', id))).map(rowToRecord);
+}
+
 // Checks the WHOLE table (not this device's branch-filtered copy) for an id.
 // Used when generating a new player id: another branch's player is invisible
 // locally, so only the DB can say the id is really free.
