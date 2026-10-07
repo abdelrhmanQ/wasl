@@ -103,6 +103,26 @@
     </header>
 
     <div class="app-container" id="app-container" style="display: none">
+      <aside class="attendance-dock card" aria-label="تسجيل حضور سريع">
+        <div class="attendance-dock-heading">
+          <span class="attendance-dock-icon" aria-hidden="true">⌁</span>
+          <div>
+            <strong>تسجيل الحضور</strong>
+          </div>
+        </div>
+        <label class="attendance-dock-label" for="attendance-code">كود اللاعب</label>
+        <input
+          type="text"
+          id="attendance-code"
+          placeholder="امسح الكود أو اكتبه هنا"
+          oninput="onAttendanceInput()"
+          autocomplete="off"
+          class="attendance-dock-input"
+        />
+        <button class="btn btn-success attendance-dock-button" onclick="recordAttendance()">تسجيل الحضور</button>
+        <div class="attendance-result" id="attendance-result"></div>
+      </aside>
+
       <!-- Backdrop behind the mobile off-canvas sidebar -->
       <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
       <!-- SIDEBAR -->
@@ -768,7 +788,7 @@
                 </thead>
                 <tbody id="trainees-table">
                   <tr>
-                    <td colspan="10" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                    <td colspan="12" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
                       لا يوجد لاعبون مسجلون بعد
                     </td>
                   </tr>
@@ -914,34 +934,7 @@
             <p>تسجيل ومتابعة حضور اللاعبين</p>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px">
-            <!-- Scanner -->
-            <div class="card">
-              <div class="card-title">إدخال كود الحضور</div>
-              <div class="scanner-area">
-                <p style="color: rgba(48, 56, 65, 0.5); margin-bottom: 15px">أدخل كود اللاعب لتسجيل الحضور</p>
-              </div>
-              <div class="form-group" style="margin-bottom: 15px">
-                <input
-                  type="text"
-                  id="attendance-code"
-                  placeholder="مثال: Wasl-0427"
-                  oninput="onAttendanceInput()"
-                  autocomplete="off"
-                  style="text-align: center; font-size: 18px; font-family: monospace; letter-spacing: 2px"
-                />
-                <p style="color: rgba(48, 56, 65, 0.4); font-size: 12px; text-align: center; margin-top: 8px">
-                  يتم تسجيل الحضور تلقائياً بمجرد إدخال الكود
-                </p>
-              </div>
-              <button class="btn btn-success" style="width: 100%" onclick="recordAttendance()">
-                تسجيل الحضور يدوياً
-              </button>
-
-              <!-- Result -->
-              <div class="attendance-result" id="attendance-result"></div>
-            </div>
-
+          <div style="display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 20px">
             <!-- Today Stats -->
             <div class="card">
               <div class="card-title">إحصائيات اليوم</div>
@@ -1025,11 +1018,12 @@
                     <th>وقت الحضور</th>
                     <th>الحالة</th>
                     <th>بواسطة</th>
+                    <th>إجراءات</th>
                   </tr>
                 </thead>
                 <tbody id="attendance-log">
                   <tr>
-                    <td colspan="6" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                    <td colspan="7" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
                       لا توجد سجلات حضور لليوم
                     </td>
                   </tr>
@@ -1446,7 +1440,9 @@
                     <th>نوع العملية</th>
                     <th>الخطة</th>
                     <th>الفرع</th>
-                    <th>المبلغ</th>
+                    <th>المحصل</th>
+                    <th>السعر الإجمالي</th>
+                    <th>المتبقي</th>
                     <th>طريقة الدفع</th>
                     <th>التاريخ</th>
                     <th>الحالة</th>
@@ -1456,7 +1452,7 @@
                 </thead>
                 <tbody id="payments-table">
                   <tr>
-                    <td colspan="11" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
+                    <td colspan="13" style="text-align: center; color: rgba(48, 56, 65, 0.3); padding: 30px">
                       لا توجد مدفوعات مسجلة
                     </td>
                   </tr>
@@ -1516,6 +1512,7 @@
                   list="extra-player-list"
                   placeholder="ابحث بالاسم أو الكود، أو اكتب اسماً جديداً"
                   autocomplete="off"
+                  oninput="onExtraPlayerChange()"
                 />
                 <datalist id="extra-player-list"></datalist>
               </div>
@@ -1552,13 +1549,31 @@
                   <option value="أرضية"></option>
                 </datalist>
               </div>
+              <div class="form-group" id="extra-sale-mode-group" style="display: none">
+                <label>نوع العملية</label>
+                <select id="extra-sale-mode" onchange="onExtraSaleModeChange()">
+                  <option value="new">تسجيل شراء جديد</option>
+                  <option value="installment">سداد دفعة لشراء سابق</option>
+                </select>
+              </div>
+              <div class="form-group" id="extra-sale-total-group" style="display: none">
+                <label>السعر الإجمالي للصنف *</label>
+                <input type="number" id="extra-sale-total" min="0" placeholder="السعر الكامل بالجنيه" />
+              </div>
+              <div class="form-group" id="extra-existing-sale-group" style="display: none">
+                <label>شراء سابق عليه باقي *</label>
+                <select id="extra-existing-sale" onchange="updateExistingSaleBalance()">
+                  <option value="">اختر عملية الشراء</option>
+                </select>
+                <small id="extra-sale-balance" class="sale-balance-hint"></small>
+              </div>
               <div class="form-group">
                 <label>البيان (اختياري)</label>
                 <input type="text" id="extra-desc" placeholder="مثال: بطولة الجمهورية — يوليو" />
               </div>
               <div class="form-group">
-                <label>المبلغ *</label>
-                <input type="number" id="extra-amount" placeholder="المبلغ بالجنيه" />
+                <label id="extra-amount-label">المبلغ *</label>
+                <input type="number" id="extra-amount" min="0" placeholder="المبلغ بالجنيه" />
               </div>
               <div class="form-group">
                 <label>طريقة الدفع</label>
@@ -1618,7 +1633,9 @@
                     <th>الحالة</th>
                     <th>البيان</th>
                     <th>الفرع</th>
-                    <th>المبلغ</th>
+                    <th>المدفوع في العملية</th>
+                    <th>السعر الإجمالي</th>
+                    <th>المتبقي</th>
                     <th>طريقة الدفع</th>
                     <th>التاريخ</th>
                     <th>بواسطة</th>

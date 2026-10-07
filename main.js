@@ -10,6 +10,45 @@
 // ==================== NAVIGATION ====================
 // Current user's role; set on login. Defaults to the most restrictive.
 let currentRole = 'employee';
+const playerPaymentCache = new Map();
+const salePaymentCache = new Map();
+const pendingSaleHistory = new Set();
+
+function cachePaymentRecord(payment) {
+  if (payment.id && playerPaymentCache.has(payment.id)) {
+    const records = playerPaymentCache.get(payment.id).filter(p => p._docId !== payment._docId);
+    records.push(payment);
+    records.complete = playerPaymentCache.get(payment.id).complete === true;
+    playerPaymentCache.set(payment.id, records);
+  }
+  if (payment.saleId) {
+    const records = (salePaymentCache.get(payment.saleId) || []).filter(p => p._docId !== payment._docId);
+    records.push(payment);
+    records.complete = true;
+    salePaymentCache.set(payment.saleId, records);
+  }
+}
+
+function removePaymentFromCaches(payment) {
+  if (payment.id && playerPaymentCache.has(payment.id)) {
+    const complete = playerPaymentCache.get(payment.id).complete === true;
+    const records = playerPaymentCache.get(payment.id).filter(p => p._docId !== payment._docId);
+    records.complete = complete;
+    playerPaymentCache.set(
+      payment.id,
+      records,
+    );
+  }
+  if (payment.saleId && salePaymentCache.has(payment.saleId)) {
+    const complete = salePaymentCache.get(payment.saleId).complete === true;
+    const records = salePaymentCache.get(payment.saleId).filter(p => p._docId !== payment._docId);
+    records.complete = complete;
+    salePaymentCache.set(
+      payment.saleId,
+      records,
+    );
+  }
+}
 
 // Mobile off-canvas sidebar (drawer). On phones the sidebar slides in from
 // the side; these toggle it and dim the page behind it.
@@ -396,6 +435,7 @@ function addPayment(fields) {
     if (t) payment.trainer = t.trainer || 'غير محدد';
   }
   data.payments.push(payment);
+  cachePaymentRecord(payment);
   dbSetDoc(paymentsCol, payment._docId, payment);
   return payment;
 }
@@ -962,31 +1002,11 @@ function resetTraineeFilters() {
   filterTrainees();
 }
 
-async function playerPaymentHistory(t) {
-  const local = data.payments.filter(payment => payment.id === t.id);
-  if (!navigator.onLine || typeof dbPlayerPayments !== 'function') {
-    local.complete = false;
-    return local;
-  }
-  try {
-    const remote = await dbPlayerPayments(t.id);
-    const recordsById = new Map(remote.map(payment => [payment._docId || payment, payment]));
-    local.forEach(payment => recordsById.set(payment._docId || payment, payment));
-    const records = [...recordsById.values()];
-    records.complete = true;
-    return records;
-  } catch (err) {
-    console.error('Player payment history error:', err);
-    showNotification('تعذر تحميل سجل مدفوعات اللاعب بالكامل؛ يتم عرض البيانات المحلية المتاحة', 'warning');
-    local.complete = false;
-    return local;
-  }
-}
-
 function buildTraineePurchaseSummary(t, payments) {
+  const playerPayments = payments.slice();
   const rows = [];
   const subscriptionTypes = new Set(['اشتراك جديد', 'تجديد', 'قسط']);
-  const subscriptionPayments = payments.filter(payment => subscriptionTypes.has(payment.type));
+  const subscriptionPayments = playerPayments.filter(p => subscriptionTypes.has(p.type));
   const explicitCycles = new Map();
   const legacySubscriptionPayments = [];
   const sales = new Map();
@@ -1009,7 +1029,7 @@ function buildTraineePurchaseSummary(t, payments) {
     explicitCycles.set(payment.subscriptionCycleId, cycle);
   });
 
-  payments.forEach(payment => {
+  playerPayments.forEach(payment => {
     if (subscriptionTypes.has(payment.type)) return;
     if (payment.type === 'مبيعات' && payment.saleId) {
       const sale = sales.get(payment.saleId) || {
@@ -1039,7 +1059,12 @@ function buildTraineePurchaseSummary(t, payments) {
       return;
     }
     if (payment.type === 'مبيعات') {
-      rows.push({ item: payment.plan || 'مبيعات قديمة', category: 'مبيعات', total: null, paid: num(payment.amount) });
+      rows.push({
+        item: payment.plan || 'مبيعات قديمة',
+        category: 'مبيعات',
+        total: null,
+        paid: num(payment.amount),
+      });
       return;
     }
     if (payment.source === 'extra') {
@@ -1102,7 +1127,8 @@ function buildTraineePurchaseSummary(t, payments) {
     const key = `${addon.key}\u0000${item}`;
     if (addonPayments.has(key)) return;
     const total = num((t.addons || {})[addon.key]);
-    if (total > 0) rows.push({ item, category: 'خدمات إضافية', total, paid: null });
+    if (total <= 0) return;
+    rows.push({ item, category: 'خدمات إضافية', total, paid: null });
   });
 
   otherPayments.forEach(payment => {
@@ -1116,18 +1142,20 @@ function buildTraineePurchaseSummary(t, payments) {
     });
   });
 
-  const totalPaid = payments.reduce((sum, payment) => sum + num(payment.amount), 0);
+  const paymentLedgerPaid = playerPayments.reduce((sum, payment) => sum + num(payment.amount), 0);
+  const totalPaid = paymentLedgerPaid;
   const knownTotal = rows.reduce((sum, row) => sum + (row.total == null ? 0 : row.total), 0);
+  const knownPaid = rows.reduce((sum, row) => sum + (row.total == null || row.paid == null ? 0 : row.paid), 0);
   const knownRemaining = rows.reduce(
     (sum, row) => sum + (row.total == null || row.paid == null ? 0 : Math.max(0, row.total - row.paid)),
     0,
   );
   const unknownTotalCount = rows.filter(row => row.total == null).length;
+  const historyComplete = payments.complete === true;
   const money = value => `${num(value).toLocaleString()} ج.م`;
   const detailRows = rows.length
     ? rows
-        .map(
-          row => `
+        .map(row => `
  <div class="player-purchase-row">
  <div class="player-purchase-heading"><strong>${esc(row.item)}</strong><span class="badge badge-info">${esc(row.category)}</span></div>
  <div class="player-purchase-values">
@@ -1135,13 +1163,16 @@ function buildTraineePurchaseSummary(t, payments) {
  <span>المدفوع: ${row.paid == null ? 'غير متاح في السجل' : money(row.paid)}</span>
  <span class="${row.total != null && row.paid != null && row.total > row.paid ? 'player-purchase-due' : ''}">المتبقي: ${row.total == null || row.paid == null ? 'غير محدد' : money(Math.max(0, row.total - row.paid))}</span>
  </div>
- </div>`,
-        )
+ </div>`)
         .join('')
     : '<div style="color:rgba(48,56,65,0.45);">لا توجد مشتريات أو خدمات مرتبطة مسجلة.</div>';
 
   return {
     totalPaid,
+    knownTotal,
+    knownPaid,
+    knownRemaining,
+    unknownTotalCount,
     html: `<div class="player-purchases">
  <div class="player-purchases-title">مشتريات ومدفوعات اللاعب</div>
  <div class="player-purchases-totals">
@@ -1149,7 +1180,7 @@ function buildTraineePurchaseSummary(t, payments) {
  <div><span>إجمالي المدفوع المسجل</span><strong>${money(totalPaid)}</strong></div>
  <div><span>المتبقي المعروف</span><strong>${money(knownRemaining)}</strong></div>
  </div>
- ${payments.complete ? '' : '<div class="player-purchases-note">تعذر تحميل سجل المدفوعات بالكامل؛ المبلغ المدفوع المعروض هو مجموع السجلات المتاحة فقط.</div>'}
+ ${historyComplete ? '' : '<div class="player-purchases-note">تعذر تحميل سجل المدفوعات بالكامل؛ المبلغ المدفوع المعروض هو مجموع السجلات المتاحة فقط.</div>'}
  ${unknownTotalCount ? `<div class="player-purchases-note">${unknownTotalCount} عملية قديمة لا تحتوي على إجمالي موثّق؛ لم يتم تخمين إجماليها أو المتبقي منها.</div>` : ''}
  <div class="player-purchases-list">${detailRows}</div>
  </div>`,
@@ -1167,7 +1198,9 @@ async function viewTrainee(index) {
   if (index < 0) return;
   t = data.trainees[index];
   const attendanceCount = data.attendance.filter(a => a.id === t.id).length;
-  const sortedPayments = playerPayments.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const sortedPayments = playerPayments
+    .slice()
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   const purchaseSummary = buildTraineePurchaseSummary(t, playerPayments);
   const playerPaymentsTotal = purchaseSummary.totalPaid;
 
@@ -1220,17 +1253,17 @@ async function viewTrainee(index) {
  <div style="font-weight: 600;">${esc(t.source || 'غير محدد')}</div>
  </div>
  </div>
- ${purchaseSummary.html}
- <div style="margin-top: 18px; padding: 15px; background: rgba(48,56,65,0.05); border-radius: 10px;">
- <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
- <div style="font-weight:700; color:var(--accent);">سجل عمليات الدفع</div>
- <span class="badge badge-success">عدد العمليات: ${playerPayments.length}</span>
- </div>
+  ${purchaseSummary.html}
+  <div style="margin-top: 18px; padding: 15px; background: rgba(48,56,65,0.05); border-radius: 10px;">
+  <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+  <div style="font-weight:700; color:var(--accent);">سجل عمليات الدفع</div>
+  <span class="badge badge-success">عدد العمليات: ${playerPayments.length}</span>
+  </div>
  ${
-   sortedPayments.length
-     ? `<div style="overflow-x:auto;"><table style="width:100%; min-width:620px;">
- <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>المبلغ</th><th>طريقة الدفع</th><th>التصنيف</th></tr></thead>
- <tbody>${sortedPayments
+    sortedPayments.length
+      ? `<div style="overflow-x:auto;"><table style="width:100%; min-width:620px;">
+  <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>المبلغ</th><th>طريقة الدفع</th><th>التصنيف</th></tr></thead>
+  <tbody>${sortedPayments
    .map(
      p => `<tr>
  <td>${esc(p.date || '—')}</td>
@@ -1254,21 +1287,6 @@ async function viewTrainee(index) {
  </div>`
      : ''
  }
- ${(() => {
-   const active = ADDON_DEFS.filter(d => num((t.addons || {})[d.key]) > 0);
-   if (active.length === 0) return '';
-   return `<div style="margin-top: 15px; padding: 15px; background: rgba(48,56,65,0.05); border-radius: 10px;">
- <div style="color: rgba(48,56,65,0.4); font-size: 12px; margin-bottom: 8px;">خدمات إضافية</div>
- <div style="display:flex; flex-wrap:wrap; gap:8px;">
- ${active
-   .map(d => {
-     const label = d.key === 'other' ? t.addonOtherName || d.label : d.label;
-     return `<span class="badge badge-info">${esc(label)}: ${num(t.addons[d.key]).toLocaleString()} ج.م</span>`;
-   })
-   .join('')}
- </div>
- </div>`;
- })()}
  ${
    t.notes
      ? `<div style="margin-top: 15px; padding: 15px; background: rgba(48,56,65,0.05); border-radius: 10px;">
@@ -1301,6 +1319,29 @@ function editTrainee(index) {
  <div class="form-group">
  <label>رقم الهاتف</label>
  <input type="tel" id="edit-phone" value="${esc(t.phone)}">
+ </div>
+ <div class="form-group">
+ <label>السن</label>
+ <input type="number" id="edit-age" value="${esc(t.age || '')}" min="0">
+ </div>
+ <div class="form-group">
+ <label>الجنس</label>
+ <select id="edit-gender">
+ <option value="" ${!t.gender ? 'selected' : ''}>غير محدد</option>
+ <option value="ولد" ${t.gender === 'ولد' ? 'selected' : ''}>ولد</option>
+ <option value="بنت" ${t.gender === 'بنت' ? 'selected' : ''}>بنت</option>
+ ${t.gender && !['ولد', 'بنت'].includes(t.gender) ? `<option value="${esc(t.gender)}" selected>${esc(t.gender)}</option>` : ''}
+ </select>
+ </div>
+ <div class="form-group">
+ <label>مصدر التسجيل</label>
+ <select id="edit-source">
+ <option value="" ${!t.source ? 'selected' : ''}>غير محدد</option>
+ <option value="سوشيال ميديا" ${t.source === 'سوشيال ميديا' ? 'selected' : ''}>سوشيال ميديا</option>
+ <option value="معرفة" ${t.source === 'معرفة' ? 'selected' : ''}>معرفة / توصية</option>
+ <option value="زيارة مباشرة" ${t.source === 'زيارة مباشرة' ? 'selected' : ''}>زيارة مباشرة</option>
+ ${t.source && !['سوشيال ميديا', 'معرفة', 'زيارة مباشرة'].includes(t.source) ? `<option value="${esc(t.source)}" selected>${esc(t.source)}</option>` : ''}
+ </select>
  </div>
  <div class="form-group">
  <label>نوع الرياضة (يمكن اختيار أكثر من لعبة)</label>
@@ -1406,6 +1447,9 @@ function saveTraineeEdit(index) {
   const oldCoach = t.trainer; // capture before the edit so we can detect a coach transfer
   t.name = document.getElementById('edit-name').value.trim() || t.name;
   t.phone = document.getElementById('edit-phone').value.trim() || t.phone;
+  t.age = val('edit-age');
+  t.gender = val('edit-gender');
+  t.source = val('edit-source');
   // Multi-sport: include any sport still selected but not added as a chip.
   const editSelectedNow = document.getElementById('edit-sport').value;
   const sportsList = editSports.slice();
@@ -1471,6 +1515,7 @@ function saveTraineeEdit(index) {
 
   dbSetDoc(traineesCol, t.id, t);
   updateTraineesTable();
+  updateAttendanceLog();
   updateFinancial();
   updateDashboard();
   closeModal();
@@ -2384,6 +2429,151 @@ function printStaffCardsSheet(branch) {
 // Auto-submit: as soon as the entered/scanned code exactly matches a known
 // trainee, register the attendance — no need to press the button or scan.
 let attendanceInputTimer = null;
+const ATTENDANCE_SCAN_START_KEYS = new Set(['A', 'B']);
+const ATTENDANCE_SCAN_MIN_LENGTH = 5;
+const ATTENDANCE_SCAN_MAX_KEY_GAP_MS = 120;
+let attendanceScanCandidate = '';
+let attendanceScanTarget = null;
+let attendanceScanTargetState = null;
+let attendanceScanLastKeyAt = 0;
+let attendanceScanIsActive = false;
+let attendanceScanIdleTimer = null;
+let attendanceScanInProgress = false;
+const attendanceScanQueue = [];
+
+function setAttendanceScannerStatus(message, scanning = false) {
+  const status = document.getElementById('attendance-scanner-status');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('scanning', scanning);
+}
+
+function rememberAttendanceScanTarget(target) {
+  attendanceScanTarget = target;
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    const supportsSelection = target instanceof HTMLTextAreaElement || /^(text|search|url|tel|password)$/i.test(target.type);
+    attendanceScanTargetState = {
+      value: target.value,
+      start: supportsSelection ? target.selectionStart : null,
+      end: supportsSelection ? target.selectionEnd : null,
+      direction: supportsSelection ? target.selectionDirection : null,
+    };
+  } else if (target instanceof HTMLElement && target.isContentEditable) {
+    attendanceScanTargetState = { text: target.textContent || '' };
+  } else {
+    attendanceScanTargetState = null;
+  }
+}
+
+function replayAttendanceScanCandidate() {
+  const target = attendanceScanTarget;
+  const state = attendanceScanTargetState;
+  const text = attendanceScanCandidate;
+  if (target && state && target.isConnected && text) {
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      target.value = state.value;
+      if (state.start !== null && state.end !== null) {
+        target.setRangeText(text, state.start, state.end, 'end');
+      } else {
+        target.value += text;
+      }
+      target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    } else if (target instanceof HTMLElement && target.isContentEditable) {
+      target.textContent = state.text + text;
+      target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    }
+  }
+  resetAttendanceScanCandidate();
+}
+
+function resetAttendanceScanCandidate() {
+  clearTimeout(attendanceScanIdleTimer);
+  attendanceScanCandidate = '';
+  attendanceScanTarget = null;
+  attendanceScanTargetState = null;
+  attendanceScanLastKeyAt = 0;
+  attendanceScanIsActive = false;
+}
+
+function finishAttendanceScan() {
+  const code = attendanceScanCandidate.trim();
+  resetAttendanceScanCandidate();
+  if (!code) {
+    setAttendanceScannerStatus('');
+    return;
+  }
+
+  clearTimeout(attendanceInputTimer);
+  document.getElementById('attendance-code').value = code;
+  setAttendanceScannerStatus('تم استلام الكود — جارٍ تسجيل الحضور');
+  void recordAttendance(code);
+}
+
+function handleAttendanceScanKeydown(event) {
+  const app = document.getElementById('app-container');
+  if (!app || getComputedStyle(app).display === 'none') return;
+
+  const now = performance.now();
+  if (
+    attendanceScanCandidate &&
+    attendanceScanLastKeyAt &&
+    now - attendanceScanLastKeyAt > ATTENDANCE_SCAN_MAX_KEY_GAP_MS &&
+    !attendanceScanIsActive
+  ) {
+    if (attendanceScanIsActive) finishAttendanceScan();
+    else replayAttendanceScanCandidate();
+  }
+
+  if (event.key === 'Enter' && attendanceScanIsActive) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    finishAttendanceScan();
+    return;
+  }
+
+  if (
+    event.repeat ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.altKey ||
+    event.key.length !== 1 ||
+    /\s/.test(event.key)
+  ) {
+    if (attendanceScanIsActive) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+    return;
+  }
+
+  if (!attendanceScanCandidate) {
+    if (!ATTENDANCE_SCAN_START_KEYS.has(event.key.toUpperCase())) return;
+    clearTimeout(attendanceInputTimer);
+    rememberAttendanceScanTarget(event.target);
+    attendanceScanCandidate = event.key;
+  } else {
+    attendanceScanCandidate += event.key;
+  }
+
+  attendanceScanLastKeyAt = now;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (attendanceScanCandidate.length >= ATTENDANCE_SCAN_MIN_LENGTH) {
+    attendanceScanIsActive = true;
+    document.getElementById('attendance-code').value = attendanceScanCandidate;
+    setAttendanceScannerStatus(`جارٍ قراءة كود يبدأ بـ ${attendanceScanCandidate[0].toUpperCase()}…`, true);
+  }
+
+  clearTimeout(attendanceScanIdleTimer);
+  attendanceScanIdleTimer = setTimeout(() => {
+    if (attendanceScanIsActive) finishAttendanceScan();
+    else replayAttendanceScanCandidate();
+  }, attendanceScanIsActive ? 220 : ATTENDANCE_SCAN_MAX_KEY_GAP_MS);
+}
+
+document.addEventListener('keydown', handleAttendanceScanKeydown, true);
+
 function onAttendanceInput() {
   clearTimeout(attendanceInputTimer);
   attendanceInputTimer = setTimeout(() => {
@@ -2394,8 +2584,26 @@ function onAttendanceInput() {
   }, 150);
 }
 
-async function recordAttendance() {
-  const raw = document.getElementById('attendance-code').value.trim();
+async function recordAttendance(scannedCode) {
+  if (attendanceScanInProgress) {
+    const queuedCode = (scannedCode || document.getElementById('attendance-code').value).trim();
+    if (queuedCode) attendanceScanQueue.push(queuedCode);
+    return;
+  }
+  attendanceScanInProgress = true;
+  try {
+    await processAttendance(scannedCode);
+  } finally {
+    attendanceScanInProgress = false;
+    setAttendanceScannerStatus('');
+    const nextCode = attendanceScanQueue.shift();
+    if (nextCode) void recordAttendance(nextCode);
+  }
+}
+
+async function processAttendance(scannedCode) {
+  const input = document.getElementById('attendance-code');
+  const raw = (scannedCode || input.value).trim();
 
   if (!raw) {
     showNotification('يرجى إدخال كود اللاعب', 'warning');
@@ -2405,8 +2613,10 @@ async function recordAttendance() {
   const trainee = findTraineeByCode(raw);
   if (!trainee) {
     renderAttendanceCard(null, null, { state: 'notfound', code: raw });
+    if (input.value.trim() === raw) input.value = '';
     return;
   }
+  if (input.value.trim() === raw) input.value = '';
   const code = trainee.id; // canonical stored id for this player
   // Which sport this check-in is for: derived from the SCANNED code's number
   // block, falling back to the player's primary sport.
@@ -2418,12 +2628,12 @@ async function recordAttendance() {
   // the DB, so it's correct even for players absent longer than the loaded
   // window. Measured BEFORE today's record is added, so it reflects the PREVIOUS
   // visit. Falls back to the local windowed data when offline.
-  const summary = await attendanceSummary(trainee);
+  const [summary, paymentHistory] = await Promise.all([attendanceSummary(trainee), playerPaymentHistory(trainee)]);
 
   // Frozen subscription -> paused, entry not allowed.
   if (trainee.frozen) {
-    renderAttendanceCard(trainee, info, { state: 'frozen', summary });
-    document.getElementById('attendance-code').value = '';
+    renderAttendanceCard(trainee, info, { state: 'frozen', summary, paymentHistory });
+    if (input.value.trim() === raw) input.value = '';
     return;
   }
 
@@ -2438,8 +2648,8 @@ async function recordAttendance() {
     a => a.id === code && a.date === today && (a.sport || '') === attendedSport,
   );
   if (alreadyCheckedIn) {
-    renderAttendanceCard(trainee, info, { state: 'already', sport: attendedSport, summary });
-    document.getElementById('attendance-code').value = '';
+    renderAttendanceCard(trainee, info, { state: 'already', sport: attendedSport, summary, paymentHistory });
+    if (input.value.trim() === raw) input.value = '';
     return;
   }
 
@@ -2466,8 +2676,8 @@ async function recordAttendance() {
   if (res && res.duplicate) {
     // Another device already recorded this player today — undo the local copy.
     data.attendance.splice(data.attendance.indexOf(attendanceEntry), 1);
-    renderAttendanceCard(trainee, info, { state: 'already', sport: attendedSport, summary });
-    document.getElementById('attendance-code').value = '';
+    renderAttendanceCard(trainee, info, { state: 'already', sport: attendedSport, summary, paymentHistory });
+    if (input.value.trim() === raw) input.value = '';
     updateAttendanceLog();
     return;
   }
@@ -2489,9 +2699,10 @@ async function recordAttendance() {
     sport: attendedSport,
     // Include today's just-recorded visit in the "recent" count shown.
     summary: { ...summary, count: summary.count + 1 },
+    paymentHistory,
   });
 
-  document.getElementById('attendance-code').value = '';
+  if (input.value.trim() === raw) input.value = '';
   updateAttendanceLog();
   updateTraineesTable();
   updateDashboard();
@@ -2556,6 +2767,179 @@ async function attendanceSummary(t) {
   }
 }
 
+async function playerPaymentHistory(t) {
+  const local = data.payments.filter(p => p.id === t.id);
+  if (!navigator.onLine || typeof dbPlayerPayments !== 'function') {
+    if (playerPaymentCache.has(t.id)) return playerPaymentCache.get(t.id);
+    local.complete = false;
+    return local;
+  }
+  try {
+    const remote = await dbPlayerPayments(t.id);
+    const recordsById = new Map(remote.map(payment => [payment._docId || payment, payment]));
+    local.forEach(payment => recordsById.set(payment._docId || payment, payment));
+    const records = [...recordsById.values()];
+    records.complete = true;
+    playerPaymentCache.set(t.id, records);
+    records.forEach(payment => {
+      if (!payment.saleId) return;
+      const saleRows = records.filter(row => row.saleId === payment.saleId);
+      saleRows.complete = true;
+      salePaymentCache.set(payment.saleId, saleRows);
+    });
+    return records;
+  } catch (err) {
+    console.error('Player payment history error:', err);
+    showNotification('تعذر تحميل سجل مدفوعات اللاعب بالكامل؛ يتم عرض البيانات المحلية المتاحة', 'warning');
+    if (playerPaymentCache.has(t.id)) return playerPaymentCache.get(t.id);
+    local.complete = false;
+    return local;
+  }
+}
+
+function playerPaymentRecords(traineeId) {
+  const combined = [...(playerPaymentCache.get(traineeId) || []), ...data.payments.filter(p => p.id === traineeId)];
+  const seen = new Set();
+  return combined.filter(p => {
+    const key = p._docId || p;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function ensureSalePaymentHistories(saleIds) {
+  if (!navigator.onLine || typeof dbSalePayments !== 'function') return;
+  saleIds.forEach(saleId => {
+    if (salePaymentCache.has(saleId) || pendingSaleHistory.has(saleId)) return;
+    pendingSaleHistory.add(saleId);
+    dbSalePayments(saleId)
+      .then(payments => {
+        const recordsById = new Map(payments.map(payment => [payment._docId || payment, payment]));
+        data.payments
+          .filter(payment => payment.saleId === saleId)
+          .forEach(payment => recordsById.set(payment._docId || payment, payment));
+        const records = [...recordsById.values()];
+        records.complete = true;
+        salePaymentCache.set(saleId, records);
+        const playerId = records[0] && records[0].id;
+        if (playerId) {
+          const existing = playerPaymentCache.get(playerId) || [];
+          const byId = new Map(existing.map(payment => [payment._docId || payment, payment]));
+          records.forEach(payment => byId.set(payment._docId || payment, payment));
+          const playerRecords = [...byId.values()];
+          playerRecords.complete = existing.complete === true;
+          playerPaymentCache.set(playerId, playerRecords);
+        }
+      })
+      .catch(err => {
+        console.error('Sale payment history error:', err);
+        const available = data.payments.filter(payment => payment.saleId === saleId);
+        available.complete = false;
+        salePaymentCache.set(saleId, available);
+        showNotification('تعذر تحميل كل دفعات عملية البيع؛ يتم عرض المتاح محلياً', 'warning');
+      })
+      .finally(() => {
+        pendingSaleHistory.delete(saleId);
+        renderExtraIncome();
+        updateFinancial();
+      });
+  });
+}
+
+function playerPaymentSummaryHTML(t, payments) {
+  const playerPayments = (payments || []).filter(p => p.id === t.id);
+  const historyComplete = payments && payments.complete === true;
+  if (!playerPayments.length) return '<div class="att-purchases-empty">لا توجد مشتريات أو مدفوعات إضافية مسجلة.</div>';
+
+  const sales = new Map();
+  const unlinkedSales = [];
+  const otherPayments = new Map();
+  const includedPayments = new Set();
+  playerPayments.forEach(p => {
+    if (p.type === 'مبيعات') {
+      if (!p.saleId) {
+        unlinkedSales.push(p);
+        includedPayments.add(p);
+        return;
+      }
+      const sale = sales.get(p.saleId) || {
+        item: p.saleItem || p.plan || 'صنف',
+        total: 0,
+        paid: 0,
+      };
+      sale.total = Math.max(sale.total, num(p.saleTotal));
+      sale.paid += num(p.amount);
+      sales.set(p.saleId, sale);
+      includedPayments.add(p);
+      return;
+    }
+  });
+
+  const rows = [];
+  sales.forEach(sale => {
+    rows.push({
+      item: sale.item,
+      total: sale.total,
+      paid: sale.paid,
+      remaining: historyComplete && sale.total > 0 ? Math.max(0, sale.total - sale.paid) : null,
+    });
+  });
+  unlinkedSales.forEach(p => rows.push({
+    item: p.plan || 'مبيعات قديمة',
+    total: null,
+    paid: num(p.amount),
+    remaining: null,
+  }));
+  ADDON_DEFS.forEach(addon => {
+    const addonName = addon.key === 'other' ? t.addonOtherName || 'أخرى' : '';
+    const addonPayments = playerPayments.filter(
+      p =>
+        !includedPayments.has(p) &&
+        p.source !== 'extra' &&
+        (addon.key === 'other'
+          ? p.type === addonName || p.plan === addonName
+          : p.type === addon.type || p.plan === addon.plan),
+    );
+    const total = num((t.addons || {})[addon.key]);
+    if (total <= 0 && addonPayments.length === 0) return;
+    addonPayments.forEach(p => includedPayments.add(p));
+    const paid = addonPayments.reduce((sum, p) => sum + num(p.amount), 0);
+    rows.push({
+      item: addon.key === 'other' ? addonName : addon.label,
+      total,
+      paid,
+      remaining: historyComplete ? Math.max(0, total - paid) : null,
+    });
+  });
+  playerPayments.forEach(p => {
+    if (includedPayments.has(p)) return;
+    const key = `${p.type || 'مدفوعات أخرى'}\u0000${p.plan || ''}`;
+    const entry = otherPayments.get(key) || { type: p.type || 'مدفوعات أخرى', plan: p.plan || '', paid: 0 };
+    entry.paid += num(p.amount);
+    otherPayments.set(key, entry);
+  });
+  otherPayments.forEach(entry => {
+    rows.push({
+      item: entry.plan && entry.plan !== entry.type ? `${entry.type} — ${entry.plan}` : entry.type,
+      total: null,
+      paid: entry.paid,
+      remaining: null,
+    });
+  });
+  if (!rows.length) return '<div class="att-purchases-empty">لا توجد مشتريات أو مدفوعات إضافية مسجلة.</div>';
+
+  return `<div class="att-purchases">
+ <div class="att-purchases-title">مشتريات ومدفوعات اللاعب</div>
+ <div class="att-purchases-list">${rows.map(row => `<div class="att-purchase-row">
+ <strong>${esc(row.item)}</strong>
+ <span>الإجمالي: ${row.total == null ? 'غير مسجل' : `${row.total.toLocaleString()} ج.م`}</span>
+ <span>${historyComplete ? 'المدفوع' : 'المدفوع المسجل'}: ${row.paid.toLocaleString()} ج.م</span>
+ <span class="${row.remaining > 0 ? 'att-balance-due' : ''}">المتبقي: ${row.remaining == null ? 'غير محدد' : `${row.remaining.toLocaleString()} ج.م`}</span>
+ </div>`).join('')}</div>
+ </div>${historyComplete ? '' : '<div class="att-purchases-empty">بيانات المدفوعات قد تكون غير مكتملة حالياً؛ لا يمكن تأكيد المتبقي قبل تحميل السجل الكامل.</div>'}`;
+}
+
 // Renders the full attendance result: trainee details + a status alert.
 function renderAttendanceCard(t, info, opts) {
   const resultDiv = document.getElementById('attendance-result');
@@ -2581,9 +2965,11 @@ function renderAttendanceCard(t, info, opts) {
  <div style="font-size:20px;font-weight:800;margin-bottom:4px;">${esc(t.name)}</div>
  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
  ${attRow('الكود', t.id)}
+ ${attRow('الهاتف', t.phone || '—')}
  ${attRow('الرياضة', sportLabel(t))}
  ${attRow('المدرب', t.trainer || 'غير محدد')}
  ${attRow('الفرع', t.branch || 'غير محدد')}
+ ${attRow('حالة اللاعب', t.status || 'غير محدد')}
  ${attRow('نوع الاشتراك', typeLabel)}
  ${attRow('المتبقي', info.remLabel || '—')}
  ${attRow('آخر حضور', lastSeenLabel(summary.lastSeen))}
@@ -2625,7 +3011,7 @@ function renderAttendanceCard(t, info, opts) {
       ? `<button class="btn btn-warning" style="width:100%; margin-top:10px;" onclick="goRenew('${esc(t.id)}')">تجديد الاشتراك الآن</button>`
       : '';
 
-  resultDiv.innerHTML = details + alert + renewBtn;
+  resultDiv.innerHTML = details + playerPaymentSummaryHTML(t, opts.paymentHistory) + alert + renewBtn;
 }
 
 // Days already pulled from the DB for the log's date picker (avoids re-fetching
@@ -2668,24 +3054,73 @@ function updateAttendanceLog() {
   const tbody = document.getElementById('attendance-log');
   if (dayAttendance.length === 0) {
     tbody.innerHTML =
-      '<tr><td colspan="6" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد سجلات حضور لهذا اليوم</td></tr>';
+      '<tr><td colspan="7" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد سجلات حضور لهذا اليوم</td></tr>';
     return;
   }
 
   tbody.innerHTML = dayAttendance
-    .map(
-      (a, i) => `
+    .map((a, i) => {
+      const traineeIndex = data.trainees.findIndex(t => t.id === a.id);
+      const actions = traineeIndex < 0
+        ? '<span style="color:rgba(48,56,65,0.4);">بيانات اللاعب غير متاحة</span>'
+        : `<div class="attendance-row-actions">
+ <button class="btn btn-outline btn-sm" onclick="viewAttendanceTrainee('${esc(a.id)}')">عرض اللاعب</button>
+ <button class="btn btn-outline btn-sm" onclick="editAttendanceTrainee('${esc(a.id)}')">تعديل البيانات</button>
+ <button class="btn btn-danger btn-sm" onclick="deleteAttendanceRecord(${i}, '${esc(a.id)}', '${esc(a.date)}', '${esc(a.sport || '')}', '${esc(a.time || '')}')">حذف الحضور</button>
+ </div>`;
+      return `
  <tr>
  <td>${i + 1}</td>
  <td><code style="color: var(--gold); font-family: monospace;">${esc(a.id)}</code></td>
- <td>${esc(a.name)}</td>
+ <td>${esc((data.trainees.find(t => t.id === a.id) || {}).name || a.name)}</td>
  <td>${esc(a.time)}</td>
  <td><span class="badge badge-success">حاضر</span></td>
  <td style="font-size:11px; color:rgba(48,56,65,0.55);">${esc((a.createdBy || '—').split('@')[0])}</td>
+ <td>${actions}</td>
  </tr>
- `,
-    )
+ `;
+    })
     .join('');
+}
+
+function viewAttendanceTrainee(traineeId) {
+  const index = data.trainees.findIndex(t => t.id === traineeId);
+  if (index < 0) {
+    showNotification('بيانات اللاعب غير موجودة', 'warning');
+    return;
+  }
+  viewTrainee(index);
+}
+
+function editAttendanceTrainee(traineeId) {
+  const index = data.trainees.findIndex(t => t.id === traineeId);
+  if (index < 0) {
+    showNotification('بيانات اللاعب غير موجودة', 'warning');
+    return;
+  }
+  editTrainee(index);
+}
+
+async function deleteAttendanceRecord(rowIndex, traineeId, date, sport, time) {
+  const records = data.attendance.filter(a => dateKey(a.date) === (dateKey(date) || date));
+  const record = records[rowIndex];
+  if (!record || record.id !== traineeId || String(record.time || '') !== time || (record.sport || '') !== sport) {
+    showNotification('تعذر تحديد سجل الحضور المطلوب؛ حدّث القائمة وحاول مرة أخرى', 'warning');
+    return;
+  }
+  if (!confirm(`حذف حضور ${record.name || traineeId} بتاريخ ${record.date}${record.time ? ` الساعة ${record.time}` : ''}؟`)) return;
+
+  try {
+    await dbDeleteAttendance(record);
+    data.attendance = data.attendance.filter(item => item !== record);
+    cacheLocally();
+    updateAttendanceLog();
+    updateDashboard();
+    showNotification('تم حذف سجل الحضور');
+  } catch (err) {
+    console.error('Attendance delete error:', err);
+    showNotification('تعذر حذف سجل الحضور من قاعدة البيانات', 'danger');
+  }
 }
 
 // ==================== FINANCIAL ====================
@@ -2789,9 +3224,10 @@ function updateFinancial() {
   renderRefunds(); // pending refund requests live in the financial section too
 
   const tbody = document.getElementById('payments-table');
+  ensureSalePaymentHistories([...new Set(data.payments.filter(p => p.saleId).map(p => p.saleId))]);
   if (data.payments.length === 0) {
     tbody.innerHTML =
-      '<tr><td colspan="11" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد مدفوعات مسجلة</td></tr>';
+      '<tr><td colspan="13" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد مدفوعات مسجلة</td></tr>';
     return;
   }
 
@@ -2808,6 +3244,12 @@ function updateFinancial() {
         parts.push(`<button class="btn btn-danger btn-sm" onclick="deletePayment('${esc(p._docId)}')">حذف</button>`);
         actions = parts.join('\n ');
       }
+      const salePayments = p.saleId
+        ? salePaymentCache.get(p.saleId) || data.payments.filter(item => item.saleId === p.saleId && item.id === p.id)
+        : [];
+      const saleTotal = Math.max(0, ...salePayments.map(item => num(item.saleTotal)));
+      const salePaid = salePayments.reduce((sum, item) => sum + num(item.amount), 0);
+      const saleHistoryComplete = salePayments.complete === true;
       return `
  <tr>
  <td><code style="color: var(--gold); font-family: monospace;">${esc(p.id)}</code></td>
@@ -2816,6 +3258,8 @@ function updateFinancial() {
  <td style="font-size: 12px;">${esc(p.plan)}</td>
  <td>${branchBadge(p.branch)}</td>
  <td style="color: var(--success); font-weight: 700;">${num(p.amount).toLocaleString()} ج.م</td>
+ <td>${saleTotal ? `${saleTotal.toLocaleString()} ج.م` : '—'}</td>
+ <td>${saleTotal ? (saleHistoryComplete ? `${Math.max(0, saleTotal - salePaid).toLocaleString()} ج.م` : 'غير متاح') : '—'}</td>
  <td>${esc(p.method)}</td>
  <td>${esc(p.date)}</td>
  <td><span class="badge badge-success">${esc(p.status)}</span></td>
@@ -2839,8 +3283,74 @@ const EXTRA_INCOME_TYPES = ['بطولة', 'اختبار', 'كشف طبي', 'مب
 
 // Show the sales-item picker only for the "مبيعات" type (item = نت/استك/جلفز...).
 function onExtraTypeChange() {
-  const grp = document.getElementById('extra-sales-item-group');
-  if (grp) grp.style.display = val('extra-type') === 'مبيعات' ? '' : 'none';
+  const isSale = val('extra-type') === 'مبيعات';
+  const itemGroup = document.getElementById('extra-sales-item-group');
+  const modeGroup = document.getElementById('extra-sale-mode-group');
+  if (itemGroup) itemGroup.style.display = isSale && val('extra-sale-mode') !== 'installment' ? '' : 'none';
+  if (modeGroup) modeGroup.style.display = isSale ? '' : 'none';
+  onExtraSaleModeChange();
+}
+
+function onExtraSaleModeChange() {
+  const isSale = val('extra-type') === 'مبيعات';
+  const isInstallment = val('extra-sale-mode') === 'installment';
+  const itemGroup = document.getElementById('extra-sales-item-group');
+  const totalGroup = document.getElementById('extra-sale-total-group');
+  const existingGroup = document.getElementById('extra-existing-sale-group');
+  const amountLabel = document.getElementById('extra-amount-label');
+  if (itemGroup) itemGroup.style.display = isSale && !isInstallment ? '' : 'none';
+  if (totalGroup) totalGroup.style.display = isSale && !isInstallment ? '' : 'none';
+  if (existingGroup) existingGroup.style.display = isSale && isInstallment ? '' : 'none';
+  if (amountLabel) amountLabel.textContent = isSale ? 'المدفوع الآن *' : 'المبلغ *';
+  if (isSale && isInstallment) onExtraPlayerChange();
+}
+
+function playerSaleGroups(traineeId) {
+  const groups = new Map();
+  playerPaymentRecords(traineeId)
+    .filter(p => {
+      const saleRecords = p.saleId && salePaymentCache.get(p.saleId);
+      return p.type === 'مبيعات' && saleRecords && saleRecords.complete === true;
+    })
+    .forEach(p => {
+    const sale = groups.get(p.saleId) || { saleId: p.saleId, item: p.saleItem || p.plan || 'صنف', total: 0, paid: 0 };
+    sale.total = Math.max(sale.total, num(p.saleTotal));
+    sale.paid += num(p.amount);
+    groups.set(p.saleId, sale);
+  });
+  return [...groups.values()].filter(sale => sale.total > sale.paid);
+}
+
+async function onExtraPlayerChange() {
+  if (val('extra-type') !== 'مبيعات' || val('extra-sale-mode') !== 'installment') return;
+  const player = resolveExtraPlayer(val('extra-player'));
+  if (player.id !== '—') await playerPaymentHistory({ id: player.id });
+  if (resolveExtraPlayer(val('extra-player')).id !== player.id) return;
+  populateExistingSaleOptions();
+}
+
+function populateExistingSaleOptions() {
+  const select = document.getElementById('extra-existing-sale');
+  if (!select) return;
+  const player = resolveExtraPlayer(val('extra-player'));
+  const sales = player.id === '—' ? [] : playerSaleGroups(player.id);
+  select.innerHTML =
+    '<option value="">اختر عملية الشراء</option>' +
+    sales
+      .map(sale => {
+        const remaining = Math.max(0, sale.total - sale.paid);
+        return `<option value="${esc(sale.saleId)}">${esc(sale.item)} — باقي ${remaining.toLocaleString()} ج.م</option>`;
+      })
+      .join('');
+  updateExistingSaleBalance();
+}
+
+function updateExistingSaleBalance() {
+  const hint = document.getElementById('extra-sale-balance');
+  if (!hint) return;
+  const player = resolveExtraPlayer(val('extra-player'));
+  const sale = playerSaleGroups(player.id).find(s => s.saleId === val('extra-existing-sale'));
+  hint.textContent = sale ? `السعر الإجمالي ${sale.total.toLocaleString()} ج.م — المدفوع ${sale.paid.toLocaleString()} ج.م — المتبقي ${(sale.total - sale.paid).toLocaleString()} ج.م` : '';
 }
 
 // Fills the #extra-player autocomplete with every registered player as
@@ -2875,6 +3385,9 @@ function addExtraIncome() {
   const desc = val('extra-desc').trim();
   const salesItem = val('extra-sales-item').trim();
   const amount = num(val('extra-amount'));
+  const isSale = type === 'مبيعات';
+  const saleMode = val('extra-sale-mode') || 'new';
+  const saleTotal = num(val('extra-sale-total'));
   const method = val('extra-method') || 'نقداً';
   const branch = val('extra-branch');
   const date = val('extra-date');
@@ -2884,12 +3397,36 @@ function addExtraIncome() {
     showNotification('اختر نوع الإيراد', 'warning');
     return;
   }
-  // Sales must name an item (from the presets or typed manually).
-  if (type === 'مبيعات' && !salesItem) {
-    showNotification('اكتب أو اختر صنف المبيعات', 'warning');
-    return;
+  let existingSale = null;
+  if (isSale && saleMode === 'new') {
+    if (!salesItem) {
+      showNotification('اكتب أو اختر صنف المبيعات', 'warning');
+      return;
+    }
+    if (saleTotal <= 0) {
+      showNotification('أدخل السعر الإجمالي للصنف', 'warning');
+      return;
+    }
+    if (amount > saleTotal) {
+      showNotification('المدفوع الآن لا يمكن أن يزيد عن السعر الإجمالي', 'warning');
+      return;
+    }
+  } else if (isSale) {
+    if (player.id === '—') {
+      showNotification('اختر لاعباً مسجلاً لسداد دفعة شراء سابقة', 'warning');
+      return;
+    }
+    existingSale = playerSaleGroups(player.id).find(s => s.saleId === val('extra-existing-sale'));
+    if (!existingSale) {
+      showNotification('اختر عملية شراء سابقة عليها باقي', 'warning');
+      return;
+    }
+    if (amount > existingSale.total - existingSale.paid) {
+      showNotification('المبلغ أكبر من المتبقي على عملية الشراء', 'warning');
+      return;
+    }
   }
-  if (amount <= 0) {
+  if (amount < 0 || (amount === 0 && (!isSale || saleMode === 'installment'))) {
     showNotification('أدخل مبلغاً صالحاً', 'warning');
     return;
   }
@@ -2898,10 +3435,15 @@ function addExtraIncome() {
     return;
   }
 
-  // For sales the item is the "plan" (and prefixes the free-text note if any).
-  const plan = type === 'مبيعات' ? (desc ? `${salesItem} — ${desc}` : salesItem) : desc || type;
+  const plan = isSale
+    ? existingSale
+      ? existingSale.item
+      : desc
+        ? `${salesItem} — ${desc}`
+        : salesItem
+    : desc || type;
 
-  addPayment({
+  const payment = {
     id: player.id,
     name: player.name || plan || type,
     type,
@@ -2912,13 +3454,24 @@ function addExtraIncome() {
     status: 'مكتمل',
     branch,
     source: 'extra',
-  });
+  };
+  if (isSale) {
+    payment.saleId = existingSale ? existingSale.saleId : genDocId('SALE');
+    payment.saleTotal = existingSale ? existingSale.total : saleTotal;
+    payment.saleItem = existingSale ? existingSale.item : plan;
+    payment.status = amount >= (existingSale ? existingSale.total - existingSale.paid : saleTotal) ? 'مكتمل' : 'دفعة جزئية';
+  }
+  addPayment(payment);
 
   setVal('extra-player', '');
   setVal('extra-desc', '');
   setVal('extra-sales-item', '');
+  setVal('extra-sale-total', '');
+  setVal('extra-sale-mode', 'new');
+  setVal('extra-existing-sale', '');
   setVal('extra-amount', '');
   setVal('extra-branch', '');
+  onExtraTypeChange();
   renderExtraIncome();
   updateFinancial();
   updateDashboard();
@@ -2936,13 +3489,14 @@ function renderExtraIncome() {
     const playerText = `${p.name || ''} ${p.id || ''}`.toLowerCase();
     return (!search || playerText.includes(search)) && (!month || paymentMonth(p.date) === month);
   });
+  ensureSalePaymentHistories([...new Set(rows.filter(p => p.saleId).map(p => p.saleId))]);
   const total = rows.reduce((s, p) => s + num(p.amount), 0);
   const totalEl = document.getElementById('extra-total');
   if (totalEl) totalEl.textContent = `${total.toLocaleString()} ج.م`;
 
   if (rows.length === 0) {
     tbody.innerHTML =
-      '<tr><td colspan="10" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد إيرادات مسجلة</td></tr>';
+      '<tr><td colspan="12" style="text-align:center; color: rgba(48,56,65,0.3); padding: 30px;">لا توجد إيرادات مسجلة</td></tr>';
     return;
   }
 
@@ -2963,6 +3517,16 @@ function renderExtraIncome() {
             ? esc(p.name)
             : '<span style="color: rgba(48,56,65,0.4);">عام</span>';
       const linked = p.id && p.id !== '—';
+      const salePayments = p.saleId
+        ? salePaymentCache.get(p.saleId) || data.payments.filter(item => item.saleId === p.saleId && item.id === p.id)
+        : [];
+      const sale = p.saleId
+        ? {
+            total: Math.max(0, ...salePayments.map(item => num(item.saleTotal))),
+            paid: salePayments.reduce((sum, item) => sum + num(item.amount), 0),
+            complete: salePayments.complete === true,
+          }
+        : null;
       return `
  <tr>
  <td><span class="badge badge-success">${esc(p.type)}</span></td>
@@ -2971,6 +3535,8 @@ function renderExtraIncome() {
  <td style="font-size: 12px;">${esc(p.plan || '—')}</td>
  <td>${branchBadge(p.branch)}</td>
  <td style="color: var(--success); font-weight: 700;">${num(p.amount).toLocaleString()} ج.م</td>
+ <td>${sale && sale.total ? `${sale.total.toLocaleString()} ج.م` : '—'}</td>
+ <td>${sale && sale.total ? (sale.complete ? `${Math.max(0, sale.total - sale.paid).toLocaleString()} ج.م` : 'غير متاح') : '—'}</td>
  <td>${esc(p.method)}</td>
  <td>${esc(p.date)}</td>
  <td style="font-size:11px; color:rgba(48,56,65,0.55);">${esc(p.createdBy || '—')}</td>
@@ -3279,6 +3845,7 @@ function deletePayment(docId) {
   const p = data.payments.find(x => x._docId === docId);
   if (!p) return;
   if (!confirm(`حذف عملية الدفع لـ "${p.name}" بمبلغ ${num(p.amount).toLocaleString()} ج.م؟`)) return;
+  removePaymentFromCaches(p);
   data.payments = data.payments.filter(x => x._docId !== docId);
   dbDeleteDoc(paymentsCol, docId);
   updateFinancial();
@@ -3295,6 +3862,7 @@ function deleteExtraIncome(docId) {
   if (!p || p.source !== 'extra') return;
   if (!confirm(`حذف إيراد "${p.type}"${p.name && p.name !== p.type ? ' لـ ' + p.name : ''} بمبلغ ${num(p.amount).toLocaleString()} ج.م؟`))
     return;
+  removePaymentFromCaches(p);
   data.payments = data.payments.filter(x => x._docId !== docId);
   dbDeleteDoc(paymentsCol, docId);
   renderExtraIncome();
@@ -3318,8 +3886,10 @@ function cancelRenewal(docId) {
   if (t && p.undo) {
     // Restore the exact pre-renewal subscription state.
     Object.assign(t, p.undo);
+    t.subscriptionCycleId = p.undo.subscriptionCycleId || '';
     dbSetDoc(traineesCol, t.id, t);
   }
+  removePaymentFromCaches(p);
   data.payments = data.payments.filter(x => x._docId !== docId);
   dbDeleteDoc(paymentsCol, docId);
   updateFinancial();
@@ -3333,10 +3903,18 @@ function cancelRenewal(docId) {
   }
 }
 
-function editPayment(docId) {
+async function editPayment(docId) {
   if (currentRole !== 'admin') return;
   const p = data.payments.find(x => x._docId === docId);
   if (!p) return;
+  if (p.saleId) {
+    if (navigator.onLine) await playerPaymentHistory({ id: p.id });
+    const saleHistory = salePaymentCache.get(p.saleId);
+    if (!saleHistory || saleHistory.complete !== true) {
+      showNotification('تعذر تحميل كامل دفعات عملية الشراء؛ لا يمكن تعديلها بأمان الآن', 'warning');
+      return;
+    }
+  }
   openModal(
     `تعديل عملية دفع - ${p.name}`,
     `
@@ -3368,12 +3946,32 @@ function savePaymentEdit(docId) {
   if (currentRole !== 'admin') return;
   const p = data.payments.find(x => x._docId === docId);
   if (!p) return;
-  p.amount = num(document.getElementById('edit-pay-amount').value);
+  const amount = num(document.getElementById('edit-pay-amount').value);
+  if (amount <= 0) {
+    showNotification('أدخل مبلغاً صالحاً', 'warning');
+    return;
+  }
+  if (p.saleId) {
+    const salePayments = salePaymentCache.get(p.saleId) || [];
+    if (salePayments.complete !== true) {
+      showNotification('لا يمكن تعديل المبلغ دون سجل كامل لدفعات عملية الشراء', 'warning');
+      return;
+    }
+    const total = Math.max(0, ...salePayments.map(x => num(x.saleTotal)));
+    const alreadyPaid = salePayments.filter(x => x._docId !== docId).reduce((sum, x) => sum + num(x.amount), 0);
+    if (amount > total - alreadyPaid) {
+      showNotification('المبلغ يتجاوز المتبقي المسموح به لعملية الشراء', 'warning');
+      return;
+    }
+  }
+  p.amount = amount;
   p.method = document.getElementById('edit-pay-method').value;
   p.date = document.getElementById('edit-pay-date').value.trim() || p.date;
+  cachePaymentRecord(p);
   dbSetDoc(paymentsCol, docId, p);
   closeModal();
   updateFinancial();
+  renderExtraIncome();
   updateDashboard();
   showNotification('تم تعديل عملية الدفع');
 }
@@ -3590,10 +4188,12 @@ function openGroup(groupId) {
 
   const members = g.memberIds.map(id => data.trainees.find(t => t.id === id)).filter(Boolean);
   const nonMembers = data.trainees.filter(t => !g.memberIds.includes(t.id));
-  const addOptions = nonMembers.length
-    ? '<option value="">اختر لاعباً لإضافته...</option>' +
-      nonMembers.map(t => `<option value="${esc(t.id)}">${esc(t.id)} — ${esc(t.name)}</option>`).join('')
-    : '<option value="">لا يوجد لاعبون متاحون للإضافة</option>';
+  const addOptions = nonMembers
+    .map(t => {
+      const codes = [...new Set([t.id, ...traineeCodes(t)])];
+      return codes.map(code => `<option value="${esc(code)}" label="${esc(t.name)}"></option>`).join('');
+    })
+    .join('');
 
   const rows = members.length
     ? members
@@ -3624,10 +4224,12 @@ function openGroup(groupId) {
     `جروب: ${g.name}`,
     `
  <div style="margin-bottom:14px; color:rgba(48,56,65,0.6);">المدرب: <strong>${esc(g.trainer || 'غير محدد')}</strong> • الفرع: ${esc(g.branch || 'غير محدد')}</div>
- <div style="display:flex; gap:8px; margin-bottom:16px;">
- <select id="group-add-select" style="flex:1; padding:9px 12px; border-radius:8px; border:1px solid var(--secondary);">${addOptions}</select>
- <button class="btn btn-primary btn-sm" onclick="addMemberToGroup('${esc(g._docId)}')">إضافة لاعب</button>
+ <div style="display:flex; gap:8px; margin-bottom:6px;">
+ <input type="search" id="group-add-code" list="group-add-code-list" placeholder="${nonMembers.length ? 'ابحث بكود اللاعب أو الـ ID' : 'لا يوجد لاعبون متاحون للإضافة'}" autocomplete="off" oninput="onGroupAddSearch('${esc(g._docId)}')" style="flex:1; padding:9px 12px; border-radius:8px; border:1px solid var(--secondary);" ${nonMembers.length ? '' : 'disabled'}>
+ <datalist id="group-add-code-list">${addOptions}</datalist>
+ <button class="btn btn-primary btn-sm" onclick="addMemberToGroup('${esc(g._docId)}')" ${nonMembers.length ? '' : 'disabled'}>إضافة لاعب</button>
  </div>
+ <div id="group-add-match" style="min-height:20px; margin-bottom:12px; color:rgba(48,56,65,0.55); font-size:12px;"></div>
  <div class="table-container">
  <table>
  <thead><tr><th>حاضر</th><th>الكود</th><th>الاسم</th><th>الاشتراك</th><th>إجراءات</th></tr></thead>
@@ -3643,15 +4245,48 @@ function openGroup(groupId) {
 function addMemberToGroup(groupId) {
   const g = (data.groups || []).find(x => x._docId === groupId);
   if (!g) return;
-  const code = document.getElementById('group-add-select').value;
-  if (!code) return;
-  g.memberIds = g.memberIds || [];
-  if (!g.memberIds.includes(code)) {
-    g.memberIds.push(code);
-    dbSetDoc(groupsCol, g._docId, g);
+  const input = document.getElementById('group-add-code');
+  const code = input ? input.value.trim() : '';
+  if (!code) {
+    showNotification('اكتب كود اللاعب أو الـ ID للبحث عنه', 'warning');
+    return;
   }
+  const trainee = findTraineeByCode(code);
+  if (!trainee) {
+    showNotification('لم يتم العثور على لاعب بهذا الكود أو الـ ID', 'warning');
+    return;
+  }
+  g.memberIds = g.memberIds || [];
+  if (g.memberIds.includes(trainee.id)) {
+    showNotification('اللاعب موجود بالفعل في هذا الجروب', 'warning');
+    return;
+  }
+  g.memberIds.push(trainee.id);
+  dbSetDoc(groupsCol, g._docId, g);
   openGroup(groupId);
   renderGroups();
+}
+
+function onGroupAddSearch(groupId) {
+  const input = document.getElementById('group-add-code');
+  const match = document.getElementById('group-add-match');
+  if (!input || !match) return;
+  const code = input.value.trim();
+  if (!code) {
+    match.textContent = '';
+    return;
+  }
+  const trainee = findTraineeByCode(code);
+  if (!trainee) {
+    match.textContent = 'لم يتم العثور على لاعب بهذا الكود';
+    return;
+  }
+  const group = (data.groups || []).find(g => g._docId === groupId);
+  if (group && (group.memberIds || []).includes(trainee.id)) {
+    match.textContent = `${trainee.name} — موجود بالفعل في الجروب`;
+    return;
+  }
+  match.textContent = `اللاعب: ${trainee.name} — ID: ${trainee.id}`;
 }
 
 function removeMemberFromGroup(groupId, code) {

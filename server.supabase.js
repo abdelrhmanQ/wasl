@@ -491,6 +491,8 @@ async function sendOp(op) {
   } else if (op.kind === 'deleteWhere') {
     const { error } = await sb.from(op.table).delete().eq(op.column, op.value);
     if (error) throw error;
+  } else if (op.kind === 'deleteAttendance') {
+    await deleteAttendanceRows(op);
   } else if (op.kind === 'counter') {
     const { error } = await sb.from('meta').upsert({ id: 'counter', data: { value: op.value } });
     if (error) throw error;
@@ -592,6 +594,13 @@ function applyOutboxLocally(onlyKey) {
     } else if (op.kind === 'deleteWhere') {
       const field = op.column === 'trainee_id' ? 'id' : op.column;
       data[key] = data[key].filter(r => r[field] !== op.value);
+    } else if (op.kind === 'deleteAttendance') {
+      data[key] = data[key].filter(
+        r =>
+          String(r.id) !== String(op.traineeId) ||
+          String(r.date) !== String(op.date) ||
+          (r.sport || '') !== (op.sport || ''),
+      );
     }
   });
 }
@@ -762,6 +771,68 @@ async function dbAddDoc(table, obj) {
   }
 }
 
+async function deleteAttendanceRows(criteria) {
+  const { data: rows, error } = await sb
+    .from(attendanceCol)
+    .select('id,data')
+    .eq('trainee_id', String(criteria.traineeId))
+    .eq('data->>date', String(criteria.date));
+  if (error) throw error;
+
+  const ids = (rows || [])
+    .filter(row => ((row.data && row.data.sport) || '') === (criteria.sport || ''))
+    .map(row => String(row.id));
+  if (!ids.length) return;
+
+  const { error: deleteError, count } = await sb
+    .from(attendanceCol)
+    .delete({ count: 'exact' })
+    .in('id', ids);
+  if (deleteError) throw deleteError;
+  if (count === 0) throw new Error('Attendance record was not deleted');
+}
+
+async function dbDeleteAttendance(entry) {
+  const criteria = {
+    traineeId: entry.id,
+    date: entry.date,
+    sport: entry.sport || '',
+  };
+  cacheLocally();
+
+  const queuedInsertIndex = outbox.findIndex(
+    op =>
+      op.kind === 'insert' &&
+      op.table === attendanceCol &&
+      String(op.obj.id) === String(criteria.traineeId) &&
+      String(op.obj.date) === String(criteria.date) &&
+      (op.obj.sport || '') === criteria.sport,
+  );
+  if (queuedInsertIndex >= 0) {
+    outbox.splice(queuedInsertIndex, 1);
+    saveOutbox();
+    return;
+  }
+
+  if (mustQueue()) {
+    enqueueOp({ kind: 'deleteAttendance', table: attendanceCol, ...criteria });
+    flushOutbox();
+    return;
+  }
+
+  try {
+    await deleteAttendanceRows(criteria);
+  } catch (err) {
+    if (isNetworkError(err)) {
+      enqueueOp({ kind: 'deleteAttendance', table: attendanceCol, ...criteria });
+      showNotification('لا يوجد اتصال — سيتم حذف الحضور عند عودة الإنترنت', 'warning');
+      return;
+    }
+    console.error('Supabase attendance delete error:', err);
+    throw err;
+  }
+}
+
 function dbDeleteDoc(table, id) {
   cacheLocally();
   // Chained on the same per-row key as dbSetDoc, so an edit followed by a
@@ -866,11 +937,15 @@ async function dbAttendanceSummary(traineeId, days = 30) {
   };
 }
 
-// Player payment history is fetched by player id, independently of the
-// time-windowed payments section, so profiles can show lifetime balances.
+// Player payment history is intentionally fetched by player id, not the
+// time-windowed payments section, so attendance can show lifetime balances.
 async function dbPlayerPayments(traineeId) {
   const id = String(traineeId);
   return (await fetchRows(paymentsCol, q => q.eq('data->>id', id))).map(rowToRecord);
+}
+
+async function dbSalePayments(saleId) {
+  return (await fetchRows(paymentsCol, q => q.eq('data->>saleId', String(saleId)))).map(rowToRecord);
 }
 
 // Checks the WHOLE table (not this device's branch-filtered copy) for an id.
